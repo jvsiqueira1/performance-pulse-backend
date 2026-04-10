@@ -1,0 +1,411 @@
+// Performance Pulse — Fase 2
+// 17 models + 11 enums cobrindo todo o domínio do dashboard de gamificação.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── Enums ───────────────────────────────────────────────────────────────────
+
+enum Role {
+  ADMIN
+  MANAGER
+}
+
+enum AssessorLevel {
+  BRONZE
+  SILVER
+  GOLD
+}
+
+enum KpiInputMode {
+  ABSOLUTE
+  PERCENT
+  QUANTITY_OVER_BASE
+}
+
+enum GoalPeriod {
+  DAILY
+  WEEKLY
+  MONTHLY
+}
+
+enum CadenceType {
+  WEEKLY
+  BIWEEKLY
+}
+
+enum MeetingOutcomeStatus {
+  SCHEDULED
+  NO_SHOW
+  DONE
+  CLOSED_WON
+  CLOSED_LOST
+}
+
+enum BetType {
+  WEEKLY
+  MONTHLY
+  CUSTOM
+}
+
+enum BetStatus {
+  ACTIVE
+  FINISHED
+  CANCELED
+}
+
+enum CofreEntryKind {
+  DEPOSIT
+  PAYOUT
+  ADJUSTMENT
+}
+
+enum BadgeScope {
+  INDIVIDUAL
+  SQUAD
+}
+
+enum InsightPeriod {
+  DAY
+  WEEK
+  MONTH
+}
+
+// ─── Models ──────────────────────────────────────────────────────────────────
+
+/// Admin/gestor login — assessores NÃO logam.
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  role         Role     @default(ADMIN)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  metricEntries MetricEntry[]
+  goalsCreated  Goal[]
+  betsCreated   Bet[]
+  cofreEntries  CofreEntry[]
+
+  @@map("users")
+}
+
+/// Representante de vendas (entidade gerenciada, sem login).
+/// points, streak, weeklyGoalPercent, kpis.* são DERIVADOS de MetricEntry.
+model Assessor {
+  id        String        @id @default(cuid())
+  name      String
+  initials  String
+  photoUrl  String?
+  level     AssessorLevel @default(BRONZE)
+  active    Boolean       @default(true)
+  hiredAt   DateTime      @default(now())
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  metricEntries     MetricEntry[]
+  badgeUnlocks      BadgeUnlock[]
+  aiInsights        AiInsight[]
+  meetingOutcomes   MeetingOutcome[]
+  squadMemberships  SquadMember[]
+  leaderOfSquads    Squad[]          @relation("SquadLeader")
+
+  @@index([active])
+  @@map("assessors")
+}
+
+/// Definição de KPI editável — substitui KPI_META hardcoded.
+model Kpi {
+  id             String       @id @default(cuid())
+  key            String       @unique
+  label          String
+  unit           String       @default("")
+  inputMode      KpiInputMode @default(ABSOLUTE)
+  baseSource     String?
+  defaultTarget  Float
+  isDerived      Boolean      @default(false)
+  derivedFormula String?
+  sortOrder      Int          @default(0)
+  active         Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  goals         Goal[]
+  metricEntries MetricEntry[]
+  activityKpis  ActivityKpi[]
+
+  @@index([active, sortOrder])
+  @@map("kpis")
+}
+
+/// Meta historizável por KPI — suporta aplicação retroativa.
+model Goal {
+  id                    String     @id @default(cuid())
+  kpiId                 String
+  kpi                   Kpi        @relation(fields: [kpiId], references: [id], onDelete: Cascade)
+  value                 Float
+  period                GoalPeriod
+  validFrom             DateTime
+  validTo               DateTime?
+  appliesRetroactively  Boolean    @default(false)
+  createdById           String
+  createdBy             User       @relation(fields: [createdById], references: [id])
+  createdAt             DateTime   @default(now())
+
+  @@index([kpiId, validFrom])
+  @@index([kpiId, validTo])
+  @@map("goals")
+}
+
+/// Item do cronograma semanal (ex: "Geração Lista Prospecção", segunda manhã).
+model Activity {
+  id                  String      @id @default(cuid())
+  name                String
+  description         String?
+  dayOfWeek           Int         // 1=seg .. 5=sex
+  startTime           String      // "HH:mm"
+  endTime             String      // "HH:mm"
+  cadenceType         CadenceType @default(WEEKLY)
+  biweeklyAnchorDate  DateTime?   @db.Date
+  sortOrder           Int         @default(0)
+  active              Boolean     @default(true)
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
+
+  kpis          ActivityKpi[]
+  metricEntries MetricEntry[]
+
+  @@index([dayOfWeek, active])
+  @@index([cadenceType])
+  @@map("activities")
+}
+
+/// Join Activity↔Kpi com target override opcional.
+model ActivityKpi {
+  id             String    @id @default(cuid())
+  activityId     String
+  activity       Activity  @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  kpiId          String
+  kpi            Kpi       @relation(fields: [kpiId], references: [id], onDelete: Restrict)
+  targetOverride Float?
+
+  @@unique([activityId, kpiId])
+  @@map("activity_kpis")
+}
+
+/// Timeseries core — entrada diária por assessor/KPI.
+/// rawValue é fonte de verdade; convertedPercent e pointsAwarded são cache.
+model MetricEntry {
+  id               String    @id @default(cuid())
+  assessorId       String
+  assessor         Assessor  @relation(fields: [assessorId], references: [id], onDelete: Cascade)
+  kpiId            String
+  kpi              Kpi       @relation(fields: [kpiId], references: [id], onDelete: Restrict)
+  activityId       String?
+  activity         Activity? @relation(fields: [activityId], references: [id], onDelete: SetNull)
+  date             DateTime  @db.Date
+  rawValue         Float
+  baseValue        Float?
+  convertedPercent Float?
+  pointsAwarded    Float?
+  enteredById      String
+  enteredBy        User      @relation(fields: [enteredById], references: [id])
+  notes            String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  scheduledMeeting MeetingOutcome?
+
+  @@unique([assessorId, kpiId, activityId, date])
+  @@index([date])
+  @@index([assessorId, date])
+  @@index([kpiId, date])
+  @@map("metric_entries")
+}
+
+/// Captura outcome de reuniões (marcou vs fechou).
+model MeetingOutcome {
+  id                      String               @id @default(cuid())
+  assessorId              String
+  assessor                Assessor             @relation(fields: [assessorId], references: [id], onDelete: Cascade)
+  scheduledDate           DateTime
+  scheduledMetricEntryId  String?              @unique
+  scheduledMetricEntry    MetricEntry?         @relation(fields: [scheduledMetricEntryId], references: [id], onDelete: SetNull)
+  outcome                 MeetingOutcomeStatus @default(SCHEDULED)
+  closedAt                DateTime?
+  ticketValue             Float?
+  notes                   String?
+  createdAt               DateTime             @default(now())
+  updatedAt               DateTime             @updatedAt
+
+  @@index([assessorId, scheduledDate])
+  @@index([outcome])
+  @@map("meeting_outcomes")
+}
+
+/// Squad de vendas.
+model Squad {
+  id        String   @id @default(cuid())
+  name      String
+  emoji     String
+  color     String
+  leaderId  String
+  leader    Assessor @relation("SquadLeader", fields: [leaderId], references: [id])
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  members      SquadMember[]
+  wonBets      Bet[]            @relation("BetWinner")
+  participants BetParticipant[]
+  badgeUnlocks BadgeUnlock[]
+  aiInsights   AiInsight[]
+
+  @@map("squads")
+}
+
+/// Join Squad↔Assessor com histórico (leftAt pra saber quem estava quando).
+model SquadMember {
+  id         String    @id @default(cuid())
+  squadId    String
+  squad      Squad     @relation(fields: [squadId], references: [id], onDelete: Cascade)
+  assessorId String
+  assessor   Assessor  @relation(fields: [assessorId], references: [id], onDelete: Cascade)
+  joinedAt   DateTime  @default(now())
+  leftAt     DateTime?
+
+  @@unique([squadId, assessorId, leftAt])
+  @@index([assessorId])
+  @@map("squad_members")
+}
+
+/// Squad bet — critério de vitória configurável via JSON.
+model Bet {
+  id                  String    @id @default(cuid())
+  roundLabel          String
+  type                BetType
+  value               Float
+  startDate           DateTime  @db.Date
+  endDate             DateTime  @db.Date
+  status              BetStatus @default(ACTIVE)
+  winnerSquadId       String?
+  winnerSquad         Squad?    @relation("BetWinner", fields: [winnerSquadId], references: [id])
+  winnerCriteriaJson  Json
+  createdById         String
+  createdBy           User      @relation(fields: [createdById], references: [id])
+  createdAt           DateTime  @default(now())
+  finishedAt          DateTime?
+
+  participants BetParticipant[]
+  cofreEntries CofreEntry[]
+
+  @@index([status])
+  @@index([endDate])
+  @@map("bets")
+}
+
+/// Participante de uma bet (snapshot de quem estava no squad quando começou).
+model BetParticipant {
+  id                  String @id @default(cuid())
+  betId               String
+  bet                 Bet    @relation(fields: [betId], references: [id], onDelete: Cascade)
+  squadId             String
+  squad               Squad  @relation(fields: [squadId], references: [id])
+  snapshotMembersJson Json
+  finalScore          Float?
+
+  @@unique([betId, squadId])
+  @@map("bet_participants")
+}
+
+/// Ledger do cofre (entradas/saídas).
+model CofreEntry {
+  id          String         @id @default(cuid())
+  betId       String?
+  bet         Bet?           @relation(fields: [betId], references: [id])
+  kind        CofreEntryKind
+  amount      Float
+  description String
+  createdById String
+  createdBy   User           @relation(fields: [createdById], references: [id])
+  createdAt   DateTime       @default(now())
+
+  @@index([createdAt])
+  @@index([betId])
+  @@map("cofre_entries")
+}
+
+/// Definição de badge (individual ou squad).
+/// ruleJson define a lógica de desbloqueio.
+model Badge {
+  id          String     @id @default(cuid())
+  slug        String     @unique
+  name        String
+  description String
+  icon        String
+  scope       BadgeScope
+  ruleJson    Json
+  active      Boolean    @default(true)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  unlocks BadgeUnlock[]
+
+  @@map("badges")
+}
+
+/// Registro de desbloqueio de badge — idempotente por periodKey.
+model BadgeUnlock {
+  id         String    @id @default(cuid())
+  badgeId    String
+  badge      Badge     @relation(fields: [badgeId], references: [id], onDelete: Cascade)
+  assessorId String?
+  assessor   Assessor? @relation(fields: [assessorId], references: [id], onDelete: Cascade)
+  squadId    String?
+  squad      Squad?    @relation(fields: [squadId], references: [id], onDelete: Cascade)
+  unlockedAt DateTime  @default(now())
+  periodKey  String
+
+  @@unique([badgeId, assessorId, periodKey])
+  @@unique([badgeId, squadId, periodKey])
+  @@index([unlockedAt])
+  @@map("badge_unlocks")
+}
+
+/// Cache de insights gerados por IA (OpenRouter).
+model AiInsight {
+  id           String        @id @default(cuid())
+  assessorId   String?
+  assessor     Assessor?     @relation(fields: [assessorId], references: [id], onDelete: Cascade)
+  squadId      String?
+  squad        Squad?        @relation(fields: [squadId], references: [id], onDelete: Cascade)
+  periodKind   InsightPeriod
+  periodKey    String
+  model        String
+  inputHash    String
+  textMarkdown String
+  summary      String
+  tags         String[]
+  createdAt    DateTime      @default(now())
+
+  @@unique([assessorId, periodKind, periodKey, inputHash])
+  @@index([assessorId, periodKind, periodKey])
+  @@map("ai_insights")
+}
+
+/// Configurações globais do sistema (anchor indique day default, frases TV, etc).
+model SystemConfig {
+  key         String   @id
+  valueJson   Json
+  updatedById String
+  updatedAt   DateTime @updatedAt
+
+  @@map("system_config")
+}

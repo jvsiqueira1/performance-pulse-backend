@@ -1,0 +1,50 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: pulse-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: pulse
+      POSTGRES_PASSWORD: pulse
+      POSTGRES_DB: performance_pulse
+    ports:
+      - "5433:5432"
+    volumes:
+      - ./postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pulse -d performance_pulse"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pulse-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      PORT: 3001
+      HOST: 0.0.0.0
+      LOG_LEVEL: info
+      DATABASE_URL: postgresql://pulse:pulse@postgres:5432/performance_pulse?schema=public
+      JWT_SECRET: dev-secret-change-in-production-pls-0123456789
+      JWT_EXPIRES_IN: 7d
+      CORS_ORIGIN: http://localhost:8080,http://localhost:5173
+      UPLOAD_DIR: /var/app/uploads
+      MAX_UPLOAD_SIZE_MB: 2
+      SEED_ADMIN_EMAIL: felipe@empresa.com
+      SEED_ADMIN_PASSWORD: troque123
+      SEED_ADMIN_NAME: Felipe
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./uploads:/var/app/uploads
+
+# O frontend fica em repositório separado (../performance-pulse) e roda via:
+#   cd ../performance-pulse && npm run dev
+# Este compose só sobe postgres + backend.
