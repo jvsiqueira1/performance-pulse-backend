@@ -1,0 +1,64 @@
+name: Build & Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  build-api:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push API image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}:latest
+            ghcr.io/${{ github.repository }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Dispara redeploy no Coolify após imagem publicada.
+      # Configure COOLIFY_WEBHOOK_API e COOLIFY_TOKEN nos secrets do repo.
+      - name: Trigger Coolify redeploy
+        if: success()
+        run: |
+          if [ -z "${{ secrets.COOLIFY_WEBHOOK_API }}" ]; then
+            echo "COOLIFY_WEBHOOK_API not configured — skipping redeploy trigger."
+            exit 0
+          fi
+          for attempt in 1 2 3; do
+            echo "Attempt $attempt/3 — triggering Coolify redeploy..."
+            if curl -sf --max-time 60 --connect-timeout 20 \
+              -X GET "${{ secrets.COOLIFY_WEBHOOK_API }}" \
+              -H "Authorization: Bearer ${{ secrets.COOLIFY_TOKEN }}"; then
+              echo "Coolify redeploy triggered successfully."
+              exit 0
+            fi
+            echo "Attempt $attempt failed."
+            [ "$attempt" -lt 3 ] && sleep 15
+          done
+          echo "All 3 attempts failed — deploy may need manual trigger."
