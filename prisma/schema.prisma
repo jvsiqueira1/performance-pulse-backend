@@ -93,6 +93,7 @@ model User {
   goalsCreated  Goal[]
   betsCreated   Bet[]
   cofreEntries  CofreEntry[]
+  prizesAwarded Prize[]
 
   @@map("users")
 }
@@ -114,6 +115,7 @@ model Assessor {
   badgeUnlocks      BadgeUnlock[]
   aiInsights        AiInsight[]
   meetingOutcomes   MeetingOutcome[]
+  prizes            Prize[]
   squadMemberships  SquadMember[]
   leaderOfSquads    Squad[]          @relation("SquadLeader")
 
@@ -398,6 +400,23 @@ model AiInsight {
   @@unique([assessorId, periodKind, periodKey, inputHash])
   @@index([assessorId, periodKind, periodKey])
   @@map("ai_insights")
+}
+
+/// Premiação individual de assessor (vale-refeição, day off, etc).
+model Prize {
+  id          String   @id @default(cuid())
+  assessorId  String
+  assessor    Assessor @relation(fields: [assessorId], references: [id], onDelete: Cascade)
+  title       String
+  description String?
+  period      String   // "2026-W15", "2026-04", etc
+  awardedById String
+  awardedBy   User     @relation(fields: [awardedById], references: [id])
+  createdAt   DateTime @default(now())
+
+  @@index([assessorId])
+  @@index([period])
+  @@map("prizes")
 }
 
 /// Configurações globais do sistema (anchor indique day default, frases TV, etc).
