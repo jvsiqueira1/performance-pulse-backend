@@ -29,7 +29,7 @@ async function main() {
   // ─── KPIs ─────────────────────────────────────────────────────────────────
   const kpiDefs = [
     { key: "leads",             label: "Leads",             unit: "",  inputMode: "ABSOLUTE" as const,           defaultTarget: 10, sortOrder: 1 },
-    { key: "cadencia",          label: "Cadência",          unit: "%", inputMode: "PERCENT" as const,           defaultTarget: 70, sortOrder: 2 },
+    { key: "cadencia",          label: "Cadência",          unit: "%", inputMode: "QUANTITY_OVER_BASE" as const, defaultTarget: 70, sortOrder: 2, baseSource: "listSize" },
     { key: "ligacoes",          label: "Ligações",          unit: "",  inputMode: "ABSOLUTE" as const,           defaultTarget: 30, sortOrder: 3 },
     { key: "reunioes",          label: "Reuniões Ag.",      unit: "",  inputMode: "ABSOLUTE" as const,           defaultTarget: 3,  sortOrder: 4 },
     { key: "indicacoes",        label: "Indicações",        unit: "",  inputMode: "ABSOLUTE" as const,           defaultTarget: 5,  sortOrder: 5 },
