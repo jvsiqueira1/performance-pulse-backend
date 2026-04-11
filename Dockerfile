@@ -15,7 +15,9 @@ COPY src ./src
 COPY prisma ./prisma
 
 # Gerar cliente Prisma 7 + build TS
-RUN npx prisma generate
+# DATABASE_URL dummy — prisma generate só precisa do schema, não conecta no banco.
+# A URL real vem das env vars do Coolify em runtime.
+RUN DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy" npx prisma generate
 RUN npm run build
 
 # Stage 2: runtime
