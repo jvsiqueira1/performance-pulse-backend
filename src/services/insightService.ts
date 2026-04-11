@@ -264,3 +264,142 @@ export async function generateInsight(
     createdAt: saved.createdAt.toISOString(),
   };
 }
+
+// ─── Team insight ────────────────────────────────────────────────────────────
+
+export interface GenerateTeamInsightParams {
+  periodKind: InsightPeriod;
+  periodKey: string;
+  force?: boolean;
+}
+
+export async function generateTeamInsight(
+  app: FastifyInstance,
+  prisma: PrismaClient,
+  params: GenerateTeamInsightParams,
+): Promise<InsightResult> {
+  const { periodKind, periodKey, force } = params;
+  const { from, to } = periodRange(periodKind, periodKey);
+
+  // Busca dados do time via buildOverview
+  const { buildOverview } = await import("./reports.js");
+  const overview = await buildOverview(prisma, { from, to });
+
+  const teamData = {
+    period: periodKey,
+    totalEntries: overview.totalMetricEntries,
+    kpis: overview.byKpi.map((k) => ({
+      label: k.label,
+      actual: k.actual,
+      target: k.target,
+      percent: k.percent,
+    })),
+    topPerformers: overview.topPerformers.map((p) => ({
+      name: p.name,
+      points: p.points,
+      pct: p.weeklyGoalPercent,
+    })),
+    bottomPerformers: overview.bottomPerformers.map((p) => ({
+      name: p.name,
+      points: p.points,
+      pct: p.weeklyGoalPercent,
+    })),
+  };
+
+  const inputHash = computeInputHash(teamData);
+
+  // Cache check (assessorId = null → team-level)
+  if (!force) {
+    const cached = await prisma.aiInsight.findFirst({
+      where: { assessorId: null, squadId: null, periodKind, periodKey, inputHash },
+    });
+    if (cached) {
+      return {
+        id: cached.id,
+        textMarkdown: cached.textMarkdown,
+        summary: cached.summary,
+        tags: cached.tags,
+        model: cached.model,
+        cached: true,
+        createdAt: cached.createdAt.toISOString(),
+      };
+    }
+  }
+
+  if (!app.openrouter.isConfigured) {
+    throw new Error("OPENROUTER_API_KEY não configurada.");
+  }
+
+  // Prompt de time
+  const kpiLines = teamData.kpis
+    .map((k) => `- ${k.label}: ${k.actual} de ${k.target} (${k.percent.toFixed(0)}%)`)
+    .join("\n");
+  const topLines = teamData.topPerformers
+    .map((p) => `- ${p.name}: ${p.points} pts, ${p.pct}% meta`)
+    .join("\n");
+  const botLines = teamData.bottomPerformers
+    .map((p) => `- ${p.name}: ${p.points} pts, ${p.pct}% meta`)
+    .join("\n");
+
+  const prompt = `Você é um coach de vendas exigente mas justo. Analise o desempenho do TIME abaixo e dê um feedback direto, prático e motivador em português brasileiro. Use markdown. Máximo 250 palavras.
+
+## Relatório do Time — ${periodKey}
+Total de registros: ${teamData.totalEntries}
+
+### KPIs do time (agregado):
+${kpiLines}
+
+### Top performers:
+${topLines}
+
+### Piores desempenhos:
+${botLines}
+
+Instruções:
+- Comece com um resumo geral de 1-2 frases (estado do time)
+- Destaque os KPIs mais fortes e mais fracos com dados concretos
+- Identifique padrões: quem está puxando o time pra cima vs pra baixo
+- Sugira 2-3 ações práticas e específicas pro gestor implementar esta semana
+- Se algum KPI está abaixo de 30% da meta, alerte com urgência
+- Compare top vs bottom performers e sugira mentoria/pareamento
+- Encerre com uma frase motivacional pro time
+- Tom: líder de vendas experiente, direto, sem floreio`;
+
+  const text = await app.openrouter.chat({
+    messages: [{ role: "user", content: prompt }],
+    maxTokens: 600,
+    temperature: 0.7,
+  });
+
+  const lines = text.split("\n").filter((l) => l.trim().length > 0);
+  const summary = lines[0]?.replace(/^#+\s*/, "").trim().slice(0, 200) ?? "";
+  const tags: string[] = [];
+  for (const k of teamData.kpis) {
+    if (k.percent >= 100) tags.push(`acima-meta-${k.label.toLowerCase()}`);
+    if (k.percent < 30) tags.push(`critico-${k.label.toLowerCase()}`);
+  }
+
+  const saved = await prisma.aiInsight.create({
+    data: {
+      assessorId: null,
+      squadId: null,
+      periodKind,
+      periodKey,
+      model: "default",
+      inputHash,
+      textMarkdown: text,
+      summary,
+      tags,
+    },
+  });
+
+  return {
+    id: saved.id,
+    textMarkdown: text,
+    summary,
+    tags,
+    model: saved.model,
+    cached: false,
+    createdAt: saved.createdAt.toISOString(),
+  };
+}

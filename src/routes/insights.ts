@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
-import { generateInsight, type InsightPeriod } from "../services/insightService.js";
+import { generateInsight, generateTeamInsight, type InsightPeriod } from "../services/insightService.js";
 import { format } from "date-fns";
 import { todayInAppTz, weekStart } from "../lib/dates.js";
 
@@ -144,6 +144,54 @@ export default async function insightRoutes(app: FastifyInstance) {
         cached: true,
         createdAt: cached.createdAt.toISOString(),
       };
+    },
+  );
+
+  // ─── Team insight ────────────────────────────────────────────────────────
+  typed.post(
+    "/api/insights/team",
+    {
+      schema: {
+        description:
+          "Gera insight de IA pra o TIME inteiro (visão geral). Cache por inputHash. Rate limit 1/min.",
+        tags: ["insights"],
+        security: [{ bearerAuth: [] }],
+        body: generateBodySchema,
+        response: { 200: insightResponseSchema },
+      },
+      onRequest: [app.authenticate],
+    },
+    async (req, reply) => {
+      const userId = req.user.sub;
+      const now = Date.now();
+      const last = lastGeneration.get(userId) ?? 0;
+      if (now - last < RATE_LIMIT_MS) {
+        const wait = Math.ceil((RATE_LIMIT_MS - (now - last)) / 1000);
+        return reply.status(429).send({
+          error: `Rate limit: aguarde ${wait}s antes de gerar outro insight`,
+        } as never);
+      }
+
+      const period = req.body.period;
+      const periodKey = req.body.periodKey ?? defaultPeriodKey(period);
+
+      try {
+        const result = await generateTeamInsight(app, app.prisma, {
+          periodKind: period,
+          periodKey,
+          force: req.body.force,
+        });
+
+        if (!result.cached) {
+          lastGeneration.set(userId, now);
+        }
+
+        return result;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Erro ao gerar insight do time";
+        app.log.error({ err }, "team insight generation failed");
+        return reply.status(500).send({ error: message } as never);
+      }
     },
   );
 }
