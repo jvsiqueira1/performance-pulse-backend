@@ -16,9 +16,11 @@ COPY prisma ./prisma
 
 # Gerar cliente Prisma 7 + build TS
 # DATABASE_URL dummy — prisma generate só precisa do schema, não conecta no banco.
-# A URL real vem das env vars do Coolify em runtime.
 RUN DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy" npx prisma generate
 RUN npm run build
+# Prisma 7 gera .ts em src/generated/ — tsc compila os .ts mas não copia os
+# runtime files do diretório internal/. Copiar tudo garante que Node encontra.
+RUN cp -r src/generated dist/
 
 # Stage 2: runtime
 FROM node:20-alpine AS runtime
