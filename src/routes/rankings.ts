@@ -136,7 +136,9 @@ export default async function rankingRoutes(app: FastifyInstance) {
       const rankings = assessors
         .map((a) => {
           const entries: MetricEntryForRollup[] = a.metricEntries;
-          const rollup = computeAssessorRollup(entries, todayInAppTz());
+          // Usa end do range como referência (não today) pra que o daily e weekly
+          // deem resultado consistente no primeiro dia da semana.
+          const rollup = computeAssessorRollup(entries, end);
           return {
             assessor: {
               id: a.id,
