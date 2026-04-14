@@ -87,27 +87,47 @@ function buildPrompt(data: PromptData): string {
 
   const badgeStr = data.badges.length > 0 ? data.badges.join(", ") : "nenhuma";
 
-  return `Você é um coach de vendas exigente mas justo. Analise o desempenho do assessor abaixo e dê um feedback direto, prático e motivador em português brasileiro. Use markdown. Máximo 200 palavras.
+  // Calcular conversão ligações→reuniões (funil)
+  const ligacoes = data.kpis.find((k) => k.label.toLowerCase().includes("ligaç"))?.value ?? 0;
+  const reunioes = data.kpis.find((k) => k.label.toLowerCase().includes("reuni"))?.value ?? 0;
+  const convRate = ligacoes > 0 ? ((reunioes / ligacoes) * 100).toFixed(1) : "N/A";
+
+  // Identificar KPIs acima e abaixo da média do time
+  const acimaDaMedia = data.kpis
+    .filter((k, i) => data.teamAvg[i] && k.value > data.teamAvg[i].avgValue)
+    .map((k) => k.label);
+  const abaixoDaMedia = data.kpis
+    .filter((k, i) => data.teamAvg[i] && k.value < data.teamAvg[i].avgValue)
+    .map((k) => k.label);
+
+  return `Você é um coach/gestor de vendas de alto nível num escritório de investimentos. Analise os dados abaixo e gere uma análise ESTRATÉGICA e PRÁTICA em português brasileiro. Use markdown. Máximo 250 palavras.
+
+CONTEXTO: Este é um escritório de assessoria de investimentos. Os assessores prospectam clientes, agendam reuniões, fazem alocações (boletas) e mantêm relacionamento com a base. O objetivo é tornar o processo de vendas PREVISÍVEL através de métricas.
 
 ## Assessor: ${data.assessorName}
 Período: ${data.period}
-Pontos: ${data.points} | Streak: ${data.streak} dias
+Pontos acumulados: ${data.points} | Streak: ${data.streak} dias consecutivos
 Conquistas: ${badgeStr}
 
-### KPIs do assessor:
+### Métricas individuais:
 ${kpiLines}
 
-### Médias do time (comparação):
+### Comparativo com a média do time:
 ${teamLines}
 
-Instruções:
-- Comece com um resumo de 1 frase (positivo ou preocupante, sem enrolação)
-- Destaque 1-2 pontos fortes com dados concretos
-- Destaque 1-2 pontos de melhoria com sugestão prática
-- Se algum KPI estiver abaixo de 50% da meta, alerte com urgência
-- Se conversão (reuniões/ligações) for baixa, sugira ajuste no pitch
-- Encerre com uma frase motivacional curta
-- Tom: direto, sem floreio, como um líder de vendas experiente falaria`;
+### Dados de funil:
+- Taxa de conversão ligações→reuniões: ${convRate}%
+- Acima da média do time em: ${acimaDaMedia.length > 0 ? acimaDaMedia.join(", ") : "nenhum KPI"}
+- Abaixo da média do time em: ${abaixoDaMedia.length > 0 ? abaixoDaMedia.join(", ") : "nenhum KPI"}
+
+### Instruções pro modelo:
+1. Comece com um VEREDICTO direto em 1 frase: este assessor está performando bem, na média, ou preocupante?
+2. Analise o FUNIL: se faz muitas ligações mas poucas reuniões, o pitch precisa melhorar. Se marca reuniões mas não converte, o closing precisa de atenção.
+3. Compare com o time: onde se destaca vs onde está ficando pra trás?
+4. Dê 2-3 AÇÕES ESPECÍFICAS e PRÁTICAS que o gestor pode cobrar esta semana (não genéricas como "melhore a cadência" — diga "aumente de X pra Y focando em Z")
+5. Se algum KPI está ZERO ou abaixo de 30% da meta, trate como URGÊNCIA
+6. Se o assessor está acima da média em tudo, reconheça e sugira como manter/escalar
+7. Tom: líder de vendas experiente que fala direto, sem floreio, com dados na mão. Não use emojis.`;
 }
 
 // ─── Main function ───────────────────────────────────────────────────────────
@@ -145,6 +165,13 @@ export async function generateInsight(
     include: { kpi: { select: { key: true } } },
   });
   const activeAssessorCount = await prisma.assessor.count({ where: { active: true } });
+
+  // Validação: sem métricas → não gasta token da IA
+  if (entries.length === 0) {
+    throw new Error(
+      `Sem métricas registradas pra ${assessor.name} no período ${periodKey}. Registre dados antes de gerar o insight.`,
+    );
+  }
 
   // Agrega por KPI
   const assessorKpis: PromptData["kpis"] = [];
@@ -341,29 +368,43 @@ export async function generateTeamInsight(
     .map((p) => `- ${p.name}: ${p.points} pts, ${p.pct}% meta`)
     .join("\n");
 
-  const prompt = `Você é um coach de vendas exigente mas justo. Analise o desempenho do TIME abaixo e dê um feedback direto, prático e motivador em português brasileiro. Use markdown. Máximo 250 palavras.
+  // Validação: sem registros → não gasta token
+  if (teamData.totalEntries === 0) {
+    throw new Error("Sem métricas registradas no período. Registre dados antes de gerar a análise do time.");
+  }
+
+  // KPIs críticos (abaixo de 30%)
+  const criticos = teamData.kpis.filter((k) => k.percent < 30).map((k) => k.label);
+  const fortes = teamData.kpis.filter((k) => k.percent >= 70).map((k) => k.label);
+
+  const prompt = `Você é o diretor comercial de um escritório de assessoria de investimentos. Analise os dados do TIME e gere um relatório ESTRATÉGICO em português brasileiro. Use markdown. Máximo 300 palavras.
+
+CONTEXTO: Escritório de investimentos com ${overview.topPerformers.length + overview.bottomPerformers.length}+ assessores. Cada um prospecta clientes (leads, ligações), agenda reuniões, faz alocações (boletas) e mantém a base (touchpoints, indicações). O objetivo é tornar vendas PREVISÍVEL: X leads → Y reuniões → Z conversões.
 
 ## Relatório do Time — ${periodKey}
-Total de registros: ${teamData.totalEntries}
+Total de registros de atividade: ${teamData.totalEntries}
 
-### KPIs do time (agregado):
+### KPIs agregados do escritório:
 ${kpiLines}
 
-### Top performers:
+### Top 3 performers:
 ${topLines}
 
-### Piores desempenhos:
+### 3 piores desempenhos:
 ${botLines}
 
-Instruções:
-- Comece com um resumo geral de 1-2 frases (estado do time)
-- Destaque os KPIs mais fortes e mais fracos com dados concretos
-- Identifique padrões: quem está puxando o time pra cima vs pra baixo
-- Sugira 2-3 ações práticas e específicas pro gestor implementar esta semana
-- Se algum KPI está abaixo de 30% da meta, alerte com urgência
-- Compare top vs bottom performers e sugira mentoria/pareamento
-- Encerre com uma frase motivacional pro time
-- Tom: líder de vendas experiente, direto, sem floreio`;
+### Análise preliminar:
+- KPIs fortes (≥70% da meta): ${fortes.length > 0 ? fortes.join(", ") : "nenhum"}
+- KPIs críticos (<30% da meta): ${criticos.length > 0 ? criticos.join(", ") : "nenhum"}
+
+### O que espero na sua análise:
+1. VEREDICTO em 1 frase: o time está no ritmo, atrás, ou acima do esperado?
+2. ANÁLISE DE FUNIL: ligações → reuniões → conversões. Onde o funil está quebrando?
+3. DISPARIDADE: qual a diferença entre o top 1 e o pior? O que o top faz que o pior não faz?
+4. 3 AÇÕES CONCRETAS pro gestor cobrar AMANHÃ (não genéricas — com números e nomes)
+5. Se tem KPI ZERO ou <30%, trate como emergência e proponha plano de ação
+6. PREVISÃO: com base no ritmo atual, o time vai bater a meta semanal/mensal?
+7. Tom: diretor comercial pragmático. Sem emojis. Sem floreio. Dados na mão.`;
 
   const text = await app.openrouter.chat({
     messages: [{ role: "user", content: prompt }],
