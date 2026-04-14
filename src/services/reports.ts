@@ -75,6 +75,12 @@ export interface AssessorKpiHistory {
   history: Array<{ date: string; value: number }>;
 }
 
+export interface AssessorNote {
+  date: string;
+  notes: string;
+  kpiLabel: string;
+}
+
 export interface AssessorReportResponse {
   assessor: {
     id: string;
@@ -97,6 +103,8 @@ export interface AssessorReportResponse {
     periodKey: string;
     unlockedAt: string;
   }>;
+  /** Observações/justificativas registradas no período. */
+  observations: AssessorNote[];
 }
 
 export interface FunnelReportResponse {
@@ -327,7 +335,7 @@ export async function buildAssessorReport(
         assessorId,
         date: { gte: params.from, lte: params.to },
       },
-      include: { kpi: { select: { key: true } } },
+      include: { kpi: { select: { key: true, label: true } } },
       orderBy: { date: "asc" },
     }),
     prisma.badgeUnlock.findMany({
@@ -390,6 +398,13 @@ export async function buildAssessorReport(
       periodKey: u.periodKey,
       unlockedAt: u.unlockedAt.toISOString(),
     })),
+    observations: entries
+      .filter((e) => e.notes && e.notes.trim().length > 0)
+      .map((e) => ({
+        date: formatDateOnly(e.date),
+        notes: e.notes!,
+        kpiLabel: (e.kpi as { key: string; label: string }).label,
+      })),
   };
 }
 
@@ -488,15 +503,21 @@ export async function buildActivityFeed(
   ]);
 
   const items: ActivityFeedItem[] = [
-    ...metrics.map<ActivityFeedItem>((m) => ({
-      id: `metric-${m.id}`,
-      type: "metric" as const,
-      timestamp: m.createdAt.toISOString(),
-      assessorId: m.assessorId,
-      assessorName: m.assessor.name,
-      description: `registrou ${m.rawValue}${m.kpi.unit} ${m.kpi.label.toLowerCase()}`,
-      icon: "CheckCircle2",
-    })),
+    ...metrics.map<ActivityFeedItem>((m) => {
+      const hasNote = m.notes && m.notes.trim().length > 0;
+      const desc = hasNote
+        ? `📝 ${m.notes!.trim()}`
+        : `registrou ${m.rawValue}${m.kpi.unit} ${m.kpi.label.toLowerCase()}`;
+      return {
+        id: `metric-${m.id}`,
+        type: hasNote ? ("observation" as "metric") : ("metric" as const),
+        timestamp: m.createdAt.toISOString(),
+        assessorId: m.assessorId,
+        assessorName: m.assessor.name,
+        description: desc,
+        icon: hasNote ? "MessageSquare" : "CheckCircle2",
+      };
+    }),
     ...unlocks.map<ActivityFeedItem>((u) => ({
       id: `unlock-${u.id}`,
       type: "badge_unlock" as const,

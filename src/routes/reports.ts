@@ -128,6 +128,13 @@ const assessorReportResponseSchema = z.object({
       unlockedAt: z.string(),
     }),
   ),
+  observations: z.array(
+    z.object({
+      date: z.string(),
+      notes: z.string(),
+      kpiLabel: z.string(),
+    }),
+  ),
 });
 
 // ─── Funnel schema ───────────────────────────────────────────────────────────
