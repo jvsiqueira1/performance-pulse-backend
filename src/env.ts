@@ -15,7 +15,7 @@ const envSchema = z.object({
   CORS_ORIGIN: z.string().default("http://localhost:8080"),
 
   UPLOAD_DIR: z.string().default("./uploads"),
-  MAX_UPLOAD_SIZE_MB: z.coerce.number().int().positive().default(2),
+  MAX_UPLOAD_SIZE_MB: z.coerce.number().int().positive().default(10),
 
   OPENROUTER_API_KEY: z.string().optional(),
   OPENROUTER_MODEL: z.string().default("google/gemini-2.5-flash"),

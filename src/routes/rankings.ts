@@ -93,7 +93,19 @@ export default async function rankingRoutes(app: FastifyInstance) {
             rollup,
           };
         })
-        .sort((a, b) => b.rollup.points - a.rollup.points);
+        .sort((a, b) => {
+          // Tie-breakers: points → weeklyGoalPercent → streak → nome (determinístico)
+          if (b.rollup.points !== a.rollup.points) {
+            return b.rollup.points - a.rollup.points;
+          }
+          if (b.rollup.weeklyGoalPercent !== a.rollup.weeklyGoalPercent) {
+            return b.rollup.weeklyGoalPercent - a.rollup.weeklyGoalPercent;
+          }
+          if (b.rollup.streak !== a.rollup.streak) {
+            return b.rollup.streak - a.rollup.streak;
+          }
+          return a.assessor.name.localeCompare(b.assessor.name);
+        });
 
       return {
         date: date.toISOString().slice(0, 10),
@@ -150,7 +162,19 @@ export default async function rankingRoutes(app: FastifyInstance) {
             rollup,
           };
         })
-        .sort((a, b) => b.rollup.points - a.rollup.points);
+        .sort((a, b) => {
+          // Tie-breakers: points → weeklyGoalPercent → streak → nome (determinístico)
+          if (b.rollup.points !== a.rollup.points) {
+            return b.rollup.points - a.rollup.points;
+          }
+          if (b.rollup.weeklyGoalPercent !== a.rollup.weeklyGoalPercent) {
+            return b.rollup.weeklyGoalPercent - a.rollup.weeklyGoalPercent;
+          }
+          if (b.rollup.streak !== a.rollup.streak) {
+            return b.rollup.streak - a.rollup.streak;
+          }
+          return a.assessor.name.localeCompare(b.assessor.name);
+        });
 
       return {
         weekStart: start.toISOString().slice(0, 10),

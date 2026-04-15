@@ -216,14 +216,46 @@ export default async function assessorRoutes(app: FastifyInstance) {
       const exists = await app.prisma.assessor.findUnique({ where: { id } });
       if (!exists) return reply.status(404).send({ error: "Assessor não encontrado" } as never);
 
-      const file = await req.file();
+      let file;
+      try {
+        file = await req.file();
+      } catch (err) {
+        const code = (err as { code?: string }).code;
+        if (code === "FST_REQ_FILE_TOO_LARGE" || code === "FST_FILES_LIMIT") {
+          return reply
+            .status(413)
+            .send({ error: `Arquivo maior que ${env.MAX_UPLOAD_SIZE_MB}MB` } as never);
+        }
+        app.log.error({ err }, "Erro ao processar upload de foto");
+        return reply.status(400).send({ error: "Falha ao processar upload" } as never);
+      }
       if (!file) return reply.status(400).send({ error: "Arquivo não enviado" } as never);
 
-      const buffer = await file.toBuffer();
-      const resized = await sharp(buffer)
-        .resize(256, 256, { fit: "cover", position: "centre" })
-        .jpeg({ quality: 85 })
-        .toBuffer();
+      let buffer;
+      try {
+        buffer = await file.toBuffer();
+      } catch (err) {
+        const code = (err as { code?: string }).code;
+        if (code === "FST_REQ_FILE_TOO_LARGE") {
+          return reply
+            .status(413)
+            .send({ error: `Arquivo maior que ${env.MAX_UPLOAD_SIZE_MB}MB` } as never);
+        }
+        throw err;
+      }
+
+      let resized;
+      try {
+        resized = await sharp(buffer)
+          .resize(256, 256, { fit: "cover", position: "centre" })
+          .jpeg({ quality: 85 })
+          .toBuffer();
+      } catch (err) {
+        app.log.error({ err }, "Sharp falhou ao processar imagem");
+        return reply
+          .status(400)
+          .send({ error: "Imagem inválida ou corrompida" } as never);
+      }
 
       const uploadRoot = resolve(env.UPLOAD_DIR);
       const assessorsDir = join(uploadRoot, "assessors");

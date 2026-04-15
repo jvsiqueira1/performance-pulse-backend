@@ -6,6 +6,12 @@ import { evaluateBadgesForAssessor } from "../services/badgeEngine.js";
 import { eventBus } from "../services/eventBus.js";
 import { parseDateOnly, todayInAppTz } from "../lib/dates.js";
 
+// Marker usado no campo `notes` pra indicar "reunião de venda" (bonus de +10 pts).
+// Se a observação começa com esse prefixo, o backend sobrescreve pointsAwarded.
+// Mantém o schema do DB intacto — não exige migration.
+const MEETING_NOTE_PREFIX = "[REUNIAO]";
+const MEETING_BONUS_POINTS = 10;
+
 const metricResponseSchema = z.object({
   id: z.string(),
   assessorId: z.string(),
@@ -137,12 +143,23 @@ export default async function metricRoutes(app: FastifyInstance) {
       });
 
       // Calcular campos derivados
-      const { convertedPercent, pointsAwarded } = computeMetricFields(
+      const computed = computeMetricFields(
         kpi,
         activeGoal,
         rawValue,
         baseValue ?? null,
       );
+
+      // Bonus de reunião de venda: se notes tem marker [REUNIAO] e tem justificativa,
+      // sobrescreve pointsAwarded pra +10. convertedPercent fica null pra não
+      // afetar a média do weeklyGoalPercent (computeAssessorRollup filtra nulls).
+      const isMeetingBonus =
+        notes !== undefined &&
+        notes.trimStart().startsWith(MEETING_NOTE_PREFIX) &&
+        notes.trimStart().slice(MEETING_NOTE_PREFIX.length).trim().length > 0;
+
+      const pointsAwarded = isMeetingBonus ? MEETING_BONUS_POINTS : computed.pointsAwarded;
+      const convertedPercent: number | null = isMeetingBonus ? null : computed.convertedPercent;
 
       // Manual upsert: findFirst em (assessorId, kpiId, date) com activityId=null
       // (Postgres trata NULL como distinct em UNIQUE, então não dá pra usar

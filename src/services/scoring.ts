@@ -89,7 +89,13 @@ export interface MetricEntryForRollup {
 export interface AssessorRollup {
   /** Soma de pointsAwarded no período. */
   points: number;
-  /** Média de convertedPercent das entries (cap 100). 0 se não houver entries. */
+  /**
+   * Soma de convertedPercent capped em 150. Reflete esforço cumulativo:
+   * registrar mais KPIs aumenta a %, ao invés da média que penalizava
+   * quem registrava mais entries de valor baixo.
+   * Histórico: até 2026-04-15 era média; mudou pra soma porque a média
+   * gerava resultado contra-intuitivo (Felipe reportou).
+   */
   weeklyGoalPercent: number;
   /** Dias consecutivos contando pra trás da data de referência (default = hoje). */
   streak: number;
@@ -109,13 +115,13 @@ export function computeAssessorRollup(
 ): AssessorRollup {
   const points = entries.reduce((sum, e) => sum + (e.pointsAwarded ?? 0), 0);
 
-  const percents = entries
-    .map((e) => e.convertedPercent)
-    .filter((v): v is number => v !== null);
-  const weeklyGoalPercent =
-    percents.length > 0
-      ? Math.round(Math.min(100, percents.reduce((a, b) => a + b, 0) / percents.length))
-      : 0;
+  // Soma de convertedPercents (não média): quem registra mais KPIs cumulativamente
+  // tem % maior. Cap 150 pra não distorcer caso de overshoot extremo.
+  const totalPercent = entries.reduce(
+    (sum, e) => sum + Math.max(0, e.convertedPercent ?? 0),
+    0,
+  );
+  const weeklyGoalPercent = Math.round(Math.min(150, totalPercent));
 
   const dayStrs = new Set(entries.map((e) => formatDateOnly(e.date)));
 
