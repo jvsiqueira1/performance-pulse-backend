@@ -83,6 +83,7 @@ export interface MetricEntryForRollup {
   convertedPercent: number | null;
   rawValue: number;
   date: Date;
+  notes?: string | null;
   kpi: { key: string };
 }
 
@@ -90,20 +91,28 @@ export interface AssessorRollup {
   /** Soma de pointsAwarded no período. */
   points: number;
   /**
-   * Soma de convertedPercent capped em 150. Reflete esforço cumulativo:
-   * registrar mais KPIs aumenta a %, ao invés da média que penalizava
-   * quem registrava mais entries de valor baixo.
-   * Histórico: até 2026-04-15 era média; mudou pra soma porque a média
-   * gerava resultado contra-intuitivo (Felipe reportou).
+   * Soma de convertedPercent capped em 150. Reflete esforço cumulativo.
    */
   weeklyGoalPercent: number;
-  /** Dias consecutivos contando pra trás da data de referência (default = hoje). */
+  /** Dias consecutivos contando pra trás da data de referência. */
   streak: number;
-  /** Soma de rawValue por kpi.key — usado pra exibir totais por KPI. */
+  /** Soma de rawValue por kpi.key. */
   kpiTotals: Record<string, number>;
-  /** Set de dias (YYYY-MM-DD) com pelo menos uma entry — usado pelo heatmap. */
+  /** Set de dias (YYYY-MM-DD) com pelo menos uma entry. */
   activeDays: string[];
+  /** Pontos deduzidos por inatividade (dias úteis sem entries e sem justificativa). */
+  penaltyPoints: number;
+  /** Dias em que a penalidade foi aplicada. */
+  penaltyDays: number;
 }
+
+/** Verifica se um dia da semana é útil (seg=1 .. sex=5). */
+function isBusinessDay(d: Date): boolean {
+  const dow = d.getUTCDay();
+  return dow >= 1 && dow <= 5;
+}
+
+const PENALTY_PER_IDLE_DAY = 15;
 
 /**
  * Agrega entries de um assessor em um período pra calcular points/streak/etc.
@@ -139,11 +148,40 @@ export function computeAssessorRollup(
     kpiTotals[e.kpi.key] = (kpiTotals[e.kpi.key] ?? 0) + e.rawValue;
   }
 
+  // Penalidade: dias úteis no período sem nenhuma entry (e sem notes/justificativa)
+  // contam como -15 pts cada. Entries com notes (justificativa) isentam o dia.
+  const activeDaysList = Array.from(dayStrs).sort();
+  const justifiedDays = new Set(
+    entries.filter((e) => e.notes && e.notes.trim().length > 0).map((e) => formatDateOnly(e.date)),
+  );
+  let penaltyDays = 0;
+  if (activeDaysList.length > 0 || referenceDate) {
+    // Range: primeiro dia ativo (ou referenceDate) até referenceDate
+    const rangeStart = activeDaysList.length > 0
+      ? new Date(activeDaysList[0])
+      : referenceDate;
+    const rangeEnd = new Date(referenceDate);
+    rangeStart.setUTCHours(0, 0, 0, 0);
+    rangeEnd.setUTCHours(0, 0, 0, 0);
+
+    const cursor = new Date(rangeStart);
+    while (cursor <= rangeEnd) {
+      const dayStr = formatDateOnly(cursor);
+      if (isBusinessDay(cursor) && !dayStrs.has(dayStr) && !justifiedDays.has(dayStr)) {
+        penaltyDays++;
+      }
+      cursor.setUTCDate(cursor.getUTCDate() + 1);
+    }
+  }
+  const penaltyPoints = penaltyDays * PENALTY_PER_IDLE_DAY;
+
   return {
-    points,
+    points: Math.max(0, points - penaltyPoints),
     weeklyGoalPercent,
     streak,
     kpiTotals,
-    activeDays: Array.from(dayStrs).sort(),
+    activeDays: activeDaysList,
+    penaltyPoints,
+    penaltyDays,
   };
 }

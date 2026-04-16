@@ -6,11 +6,12 @@ import { evaluateBadgesForAssessor } from "../services/badgeEngine.js";
 import { eventBus } from "../services/eventBus.js";
 import { parseDateOnly, todayInAppTz } from "../lib/dates.js";
 
-// Marker usado no campo `notes` pra indicar "reunião de venda" (bonus de +10 pts).
-// Se a observação começa com esse prefixo, o backend sobrescreve pointsAwarded.
-// Mantém o schema do DB intacto — não exige migration.
+// Markers no campo `notes` pra reuniões que geram pontos automáticos.
+// Backend sobrescreve pointsAwarded. Sem migration.
 const MEETING_NOTE_PREFIX = "[REUNIAO]";
 const MEETING_BONUS_POINTS = 10;
+const MEETING_AREA_PREFIX = "[REUNIAO_AREA]";
+const MEETING_AREA_POINTS = 5;
 
 const metricResponseSchema = z.object({
   id: z.string(),
@@ -150,16 +151,27 @@ export default async function metricRoutes(app: FastifyInstance) {
         baseValue ?? null,
       );
 
-      // Bonus de reunião de venda: se notes tem marker [REUNIAO] e tem justificativa,
-      // sobrescreve pointsAwarded pra +10. convertedPercent fica null pra não
-      // afetar a média do weeklyGoalPercent (computeAssessorRollup filtra nulls).
+      // Bonus de reunião: markers no notes sobrescrevem pontos.
+      // [REUNIAO] → +10 pts, [REUNIAO_AREA] → +5 pts.
+      // convertedPercent fica null pra não afetar weeklyGoalPercent.
+      const trimmedNotes = notes?.trimStart() ?? "";
       const isMeetingBonus =
-        notes !== undefined &&
-        notes.trimStart().startsWith(MEETING_NOTE_PREFIX) &&
-        notes.trimStart().slice(MEETING_NOTE_PREFIX.length).trim().length > 0;
+        trimmedNotes.startsWith(MEETING_NOTE_PREFIX) &&
+        !trimmedNotes.startsWith(MEETING_AREA_PREFIX) &&
+        trimmedNotes.slice(MEETING_NOTE_PREFIX.length).trim().length > 0;
+      const isMeetingAreaBonus =
+        trimmedNotes.startsWith(MEETING_AREA_PREFIX) &&
+        trimmedNotes.slice(MEETING_AREA_PREFIX.length).trim().length > 0;
 
-      const pointsAwarded = isMeetingBonus ? MEETING_BONUS_POINTS : computed.pointsAwarded;
-      const convertedPercent: number | null = isMeetingBonus ? null : computed.convertedPercent;
+      let pointsAwarded = computed.pointsAwarded;
+      let convertedPercent: number | null = computed.convertedPercent;
+      if (isMeetingBonus) {
+        pointsAwarded = MEETING_BONUS_POINTS;
+        convertedPercent = null;
+      } else if (isMeetingAreaBonus) {
+        pointsAwarded = MEETING_AREA_POINTS;
+        convertedPercent = null;
+      }
 
       // Manual upsert: findFirst em (assessorId, kpiId, date) com activityId=null
       // (Postgres trata NULL como distinct em UNIQUE, então não dá pra usar

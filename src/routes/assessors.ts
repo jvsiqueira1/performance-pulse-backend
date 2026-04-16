@@ -15,6 +15,8 @@ const assessorResponseSchema = z.object({
   photoUrl: z.string().nullable(),
   level: assessorLevelSchema,
   active: z.boolean(),
+  totalLeads: z.number(),
+  totalClients: z.number(),
   hiredAt: z.string(),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -31,6 +33,8 @@ const updateAssessorBodySchema = z.object({
   initials: z.string().min(1).max(4).optional(),
   level: assessorLevelSchema.optional(),
   active: z.boolean().optional(),
+  totalLeads: z.number().int().min(0).optional(),
+  totalClients: z.number().int().min(0).optional(),
 });
 
 const listQuerySchema = z.object({
@@ -55,6 +59,8 @@ function serializeAssessor(a: {
   photoUrl: string | null;
   level: string;
   active: boolean;
+  totalLeads: number;
+  totalClients: number;
   hiredAt: Date;
   createdAt: Date;
   updatedAt: Date;
@@ -66,6 +72,8 @@ function serializeAssessor(a: {
     photoUrl: a.photoUrl,
     level: a.level as "BRONZE" | "SILVER" | "GOLD",
     active: a.active,
+    totalLeads: a.totalLeads,
+    totalClients: a.totalClients,
     hiredAt: a.hiredAt.toISOString(),
     createdAt: a.createdAt.toISOString(),
     updatedAt: a.updatedAt.toISOString(),

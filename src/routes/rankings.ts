@@ -26,6 +26,8 @@ const rankingEntrySchema = z.object({
     streak: z.number(),
     kpiTotals: z.record(z.string(), z.number()),
     activeDays: z.array(z.string()),
+    penaltyPoints: z.number(),
+    penaltyDays: z.number(),
   }),
 });
 

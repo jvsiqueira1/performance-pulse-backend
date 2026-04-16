@@ -63,6 +63,7 @@ export interface OverviewReportResponse {
   byKpi: OverviewByKpiEntry[];
   topPerformers: OverviewPerformerEntry[];
   bottomPerformers: OverviewPerformerEntry[];
+  allPerformers: OverviewPerformerEntry[];
 }
 
 export interface AssessorKpiHistory {
@@ -309,6 +310,7 @@ export async function buildOverview(
     byKpi,
     topPerformers: sortedDesc.slice(0, 3),
     bottomPerformers: sortedAsc.slice(0, 3),
+    allPerformers: sortedDesc,
   };
 }
 

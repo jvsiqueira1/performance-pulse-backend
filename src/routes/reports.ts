@@ -84,6 +84,7 @@ const overviewResponseSchema = z.object({
   byKpi: z.array(overviewByKpiSchema),
   topPerformers: z.array(overviewPerformerSchema),
   bottomPerformers: z.array(overviewPerformerSchema),
+  allPerformers: z.array(overviewPerformerSchema),
 });
 
 // ─── Assessor report schema ──────────────────────────────────────────────────

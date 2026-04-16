@@ -32,10 +32,13 @@ async function main() {
     { key: "cadencia",          label: "Cadência",          unit: "%", inputMode: "QUANTITY_OVER_BASE" as const, defaultTarget: 70, sortOrder: 2, baseSource: "listSize" },
     { key: "ligacoes",          label: "Ligações",          unit: "",  inputMode: "ABSOLUTE" as const,           defaultTarget: 30, sortOrder: 3 },
     { key: "reunioes",          label: "Reuniões Ag.",      unit: "",  inputMode: "ABSOLUTE" as const,           defaultTarget: 3,  sortOrder: 4 },
-    { key: "indicacoes",        label: "Indicações",        unit: "",  inputMode: "ABSOLUTE" as const,           defaultTarget: 5,  sortOrder: 5 },
-    { key: "boletos",           label: "Boletas",           unit: "",  inputMode: "ABSOLUTE" as const,           defaultTarget: 10, sortOrder: 6 },
-    { key: "conversaoReuniao",  label: "Conv. Reunião",     unit: "%", inputMode: "PERCENT" as const,            defaultTarget: 20, sortOrder: 7, isDerived: true, derivedFormula: "reunioes / ligacoes" },
-    { key: "conversaoFechamento", label: "Conv. Fechamento", unit: "%", inputMode: "PERCENT" as const,          defaultTarget: 30, sortOrder: 8, isDerived: true, derivedFormula: "CLOSED_WON / reunioes" },
+    { key: "reunioes_realizadas", label: "Reuniões Real.", unit: "",  inputMode: "ABSOLUTE" as const,           defaultTarget: 2,  sortOrder: 5 },
+    { key: "touchpoint",        label: "Touch Point",        unit: "%", inputMode: "QUANTITY_OVER_BASE" as const, defaultTarget: 70, sortOrder: 6, baseSource: "totalClients" },
+    { key: "ativacao_conta",    label: "Ativação Conta",    unit: "",  inputMode: "ABSOLUTE" as const,           defaultTarget: 1,  sortOrder: 7 },
+    { key: "indicacoes",        label: "Indicações",        unit: "",  inputMode: "ABSOLUTE" as const,           defaultTarget: 5,  sortOrder: 8 },
+    { key: "boletos",           label: "Boletas",           unit: "",  inputMode: "ABSOLUTE" as const,           defaultTarget: 10, sortOrder: 9 },
+    { key: "conversaoReuniao",  label: "Conv. Reunião",     unit: "%", inputMode: "PERCENT" as const,            defaultTarget: 20, sortOrder: 10, isDerived: true, derivedFormula: "reunioes / ligacoes" },
+    { key: "conversaoFechamento", label: "Conv. Fechamento", unit: "%", inputMode: "PERCENT" as const,          defaultTarget: 30, sortOrder: 11, isDerived: true, derivedFormula: "CLOSED_WON / reunioes" },
   ];
 
   const kpis: Record<string, string> = {};
