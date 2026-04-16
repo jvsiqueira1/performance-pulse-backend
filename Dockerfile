@@ -37,10 +37,6 @@ COPY --from=builder /app/prisma.config.ts ./prisma.config.ts
 COPY --from=builder /app/tsconfig.json ./tsconfig.json
 COPY --from=builder /app/package.json ./package.json
 
-# Criar diretório de uploads (montado como volume no Coolify)
-RUN mkdir -p /var/app/uploads
-ENV UPLOAD_DIR=/var/app/uploads
-
 EXPOSE 3001
 
 # tsx roda TypeScript direto — resolve Prisma 7 ESM sem problemas

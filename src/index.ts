@@ -4,7 +4,6 @@ import prismaPlugin from "./plugins/prisma.js";
 import authPlugin from "./plugins/auth.js";
 import multipartPlugin from "./plugins/multipart.js";
 import rateLimitPlugin from "./plugins/rate-limit.js";
-import staticUploadsPlugin from "./plugins/static-uploads.js";
 import corsPlugin from "./plugins/cors.js";
 import swaggerPlugin from "./plugins/swagger.js";
 import healthRoutes from "./routes/health.js";
@@ -50,7 +49,6 @@ async function buildApp() {
   await app.register(authPlugin);
   await app.register(multipartPlugin);
   await app.register(rateLimitPlugin);
-  await app.register(staticUploadsPlugin);
 
   // Service plugins
   await app.register(openrouterPlugin);

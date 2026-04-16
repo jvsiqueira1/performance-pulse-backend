@@ -14,10 +14,9 @@ const envSchema = z.object({
 
   CORS_ORIGIN: z.string().default("http://localhost:8080"),
 
-  UPLOAD_DIR: z.string().default("./uploads"),
   MAX_UPLOAD_SIZE_MB: z.coerce.number().int().positive().default(10),
 
-  // Cloudflare R2 (opcional — se R2_BUCKET vazio, usa storage local via UPLOAD_DIR)
+  // Cloudflare R2 (obrigatório em produção — fotos de assessor)
   R2_ACCOUNT_ID: z.string().optional(),
   R2_ACCESS_KEY_ID: z.string().optional(),
   R2_SECRET_ACCESS_KEY: z.string().optional(),

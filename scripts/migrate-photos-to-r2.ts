@@ -1,29 +1,38 @@
 /**
- * Migra fotos de assessor do storage local (UPLOAD_DIR/assessors/*.jpg) pro Cloudflare R2.
+ * Migração + limpeza de fotos de assessor pra Cloudflare R2.
  *
  * Como rodar:
  *   - Local:  npx tsx scripts/migrate-photos-to-r2.ts
- *   - No VPS: docker exec <container> npx tsx scripts/migrate-photos-to-r2.ts
+ *   - No VPS: abrir Terminal do container no Coolify e rodar o mesmo comando
  *
- * Requer R2_* env vars configuradas no `.env`.
- * Idempotente: re-upload sobrescreve; update no DB usa `photoUrl` novo.
+ * Requer R2_* env vars configuradas.
  *
  * Fluxo:
  * 1. Lista todos os assessors com photoUrl local (começam com "/uploads/")
  * 2. Pra cada um:
- *    a. Abre o arquivo local (UPLOAD_DIR/assessors/{assessorId}.jpg)
- *    b. Faz PutObject no R2
- *    c. Atualiza assessor.photoUrl com a URL do R2
- * 3. Loga resultado (sucesso/falha por assessor).
+ *    a. Se o arquivo local existir: faz upload pro R2 e atualiza photoUrl
+ *    b. Se NÃO existir (foto perdida em algum redeploy): seta photoUrl=null
+ *       pra UI parar de tentar carregar URL quebrada e mostrar fallback de iniciais.
+ * 3. Loga resultado.
  */
 
 import { readFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
 import { existsSync } from "node:fs";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../src/generated/prisma/client.js";
 import { env } from "../src/env.js";
 import { getPhotoStorage } from "../src/services/photoStorage.js";
+
+// Locais onde o volume de uploads podia estar antes da migração pro R2.
+const POSSIBLE_UPLOAD_DIRS = ["/var/app/uploads", "./uploads"];
+
+function findLocalPhoto(assessorId: string): string | null {
+  for (const root of POSSIBLE_UPLOAD_DIRS) {
+    const path = `${root}/assessors/${assessorId}.jpg`;
+    if (existsSync(path)) return path;
+  }
+  return null;
+}
 
 async function main() {
   if (!env.R2_BUCKET || !env.R2_PUBLIC_URL) {
@@ -31,12 +40,11 @@ async function main() {
     process.exit(1);
   }
 
-  // Prisma 7 requer driver adapter explícito (mesma init que src/plugins/prisma.ts)
   const adapter = new PrismaPg({ connectionString: env.DATABASE_URL });
   const prisma = new PrismaClient({ adapter });
   const storage = getPhotoStorage();
 
-  console.log("🔎 Buscando assessors com fotos locais...");
+  console.log("🔎 Buscando assessors com photoUrl local (/uploads/...)...");
   const assessors = await prisma.assessor.findMany({
     where: {
       photoUrl: { startsWith: "/uploads/" },
@@ -45,45 +53,55 @@ async function main() {
   });
 
   if (assessors.length === 0) {
-    console.log("✅ Nenhum assessor com foto local pra migrar.");
+    console.log("✅ Nenhum assessor com photoUrl local — nada a migrar.");
     await prisma.$disconnect();
     return;
   }
 
-  console.log(`📦 ${assessors.length} foto(s) pra migrar.\n`);
+  console.log(`📦 ${assessors.length} assessor(es) encontrado(s).\n`);
 
-  const uploadRoot = resolve(env.UPLOAD_DIR);
-  let ok = 0;
-  let skipped = 0;
+  let uploaded = 0;
+  let cleared = 0;
   let failed = 0;
 
   for (const a of assessors) {
-    const localPath = join(uploadRoot, "assessors", `${a.id}.jpg`);
-    if (!existsSync(localPath)) {
-      console.warn(`⚠️  ${a.name}: arquivo local não existe (${localPath}) — pulando`);
-      skipped++;
-      continue;
-    }
+    const localPath = findLocalPhoto(a.id);
 
-    try {
-      const buffer = await readFile(localPath);
-      const newUrl = await storage.uploadAssessorPhoto(a.id, buffer);
-      await prisma.assessor.update({
-        where: { id: a.id },
-        data: { photoUrl: newUrl },
-      });
-      console.log(`✅ ${a.name} → ${newUrl}`);
-      ok++;
-    } catch (err) {
-      console.error(`❌ ${a.name}: ${err instanceof Error ? err.message : String(err)}`);
-      failed++;
+    if (localPath) {
+      // Arquivo existe: migra pro R2
+      try {
+        const buffer = await readFile(localPath);
+        const newUrl = await storage.uploadAssessorPhoto(a.id, buffer);
+        await prisma.assessor.update({
+          where: { id: a.id },
+          data: { photoUrl: newUrl },
+        });
+        console.log(`✅ ${a.name}: migrado → ${newUrl}`);
+        uploaded++;
+      } catch (err) {
+        console.error(`❌ ${a.name}: ${err instanceof Error ? err.message : String(err)}`);
+        failed++;
+      }
+    } else {
+      // Arquivo não existe (foto perdida): limpa URL do banco
+      try {
+        await prisma.assessor.update({
+          where: { id: a.id },
+          data: { photoUrl: null },
+        });
+        console.log(`🧹 ${a.name}: arquivo local não existe — photoUrl limpa`);
+        cleared++;
+      } catch (err) {
+        console.error(`❌ ${a.name} (clear): ${err instanceof Error ? err.message : String(err)}`);
+        failed++;
+      }
     }
   }
 
   console.log(`\n──────────────────────────────────────`);
-  console.log(`✅ Sucesso:  ${ok}`);
-  console.log(`⚠️  Pulados: ${skipped}`);
-  console.log(`❌ Falhas:  ${failed}`);
+  console.log(`✅ Migradas pro R2: ${uploaded}`);
+  console.log(`🧹 URLs limpas:     ${cleared}`);
+  console.log(`❌ Falhas:          ${failed}`);
   console.log(`──────────────────────────────────────`);
 
   await prisma.$disconnect();
