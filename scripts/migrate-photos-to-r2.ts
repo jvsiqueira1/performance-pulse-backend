@@ -20,6 +20,7 @@
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { existsSync } from "node:fs";
+import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../src/generated/prisma/client.js";
 import { env } from "../src/env.js";
 import { getPhotoStorage } from "../src/services/photoStorage.js";
@@ -30,7 +31,9 @@ async function main() {
     process.exit(1);
   }
 
-  const prisma = new PrismaClient();
+  // Prisma 7 requer driver adapter explícito (mesma init que src/plugins/prisma.ts)
+  const adapter = new PrismaPg({ connectionString: env.DATABASE_URL });
+  const prisma = new PrismaClient({ adapter });
   const storage = getPhotoStorage();
 
   console.log("🔎 Buscando assessors com fotos locais...");
