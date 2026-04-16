@@ -125,7 +125,7 @@ export interface FunnelReportResponse {
 
 export interface ActivityFeedItem {
   id: string;
-  type: "metric" | "badge_unlock";
+  type: "metric" | "badge_unlock" | "observation" | "meeting" | "meeting_area";
   timestamp: string; // ISO
   assessorId: string;
   assessorName: string;
@@ -506,18 +506,37 @@ export async function buildActivityFeed(
 
   const items: ActivityFeedItem[] = [
     ...metrics.map<ActivityFeedItem>((m) => {
-      const hasNote = m.notes && m.notes.trim().length > 0;
-      const desc = hasNote
-        ? `📝 ${m.notes!.trim()}`
-        : `registrou ${m.rawValue}${m.kpi.unit} ${m.kpi.label.toLowerCase()}`;
+      const noteText = m.notes?.trim() ?? "";
+      const isMeeting = noteText.startsWith("[REUNIAO]") && !noteText.startsWith("[REUNIAO_AREA]");
+      const isMeetingArea = noteText.startsWith("[REUNIAO_AREA]");
+      const isObservation = noteText.length > 0 && !isMeeting && !isMeetingArea;
+
+      let type: ActivityFeedItem["type"] = "metric";
+      let desc = `registrou ${m.rawValue}${m.kpi.unit} ${m.kpi.label.toLowerCase()}`;
+      let icon = "CheckCircle2";
+
+      if (isMeeting) {
+        type = "meeting";
+        desc = `🤝 Reunião de venda: ${noteText.slice("[REUNIAO]".length).trim()}`;
+        icon = "Handshake";
+      } else if (isMeetingArea) {
+        type = "meeting_area";
+        desc = `🗣️ Reunião c/ áreas: ${noteText.slice("[REUNIAO_AREA]".length).trim()}`;
+        icon = "Users";
+      } else if (isObservation) {
+        type = "observation";
+        desc = `📝 ${noteText}`;
+        icon = "MessageSquare";
+      }
+
       return {
         id: `metric-${m.id}`,
-        type: hasNote ? ("observation" as "metric") : ("metric" as const),
+        type,
         timestamp: m.createdAt.toISOString(),
         assessorId: m.assessorId,
         assessorName: m.assessor.name,
         description: desc,
-        icon: hasNote ? "MessageSquare" : "CheckCircle2",
+        icon,
       };
     }),
     ...unlocks.map<ActivityFeedItem>((u) => ({

@@ -163,7 +163,7 @@ const funnelQuerySchema = dateRangeQuerySchema.extend({
 
 const activityFeedItemSchema = z.object({
   id: z.string(),
-  type: z.enum(["metric", "badge_unlock"]),
+  type: z.enum(["metric", "badge_unlock", "observation", "meeting", "meeting_area"]),
   timestamp: z.string(),
   assessorId: z.string(),
   assessorName: z.string(),
