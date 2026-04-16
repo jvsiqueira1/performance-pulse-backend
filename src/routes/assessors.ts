@@ -2,9 +2,8 @@ import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import sharp from "sharp";
-import { mkdir, writeFile } from "node:fs/promises";
-import { resolve, join } from "node:path";
 import { env } from "../env.js";
+import { getPhotoStorage } from "../services/photoStorage.js";
 
 const assessorLevelSchema = z.enum(["BRONZE", "SILVER", "GOLD"]);
 
@@ -265,14 +264,17 @@ export default async function assessorRoutes(app: FastifyInstance) {
           .send({ error: "Imagem inválida ou corrompida" } as never);
       }
 
-      const uploadRoot = resolve(env.UPLOAD_DIR);
-      const assessorsDir = join(uploadRoot, "assessors");
-      await mkdir(assessorsDir, { recursive: true });
+      // Grava via storage adapter: R2 se configurado, senão disco local.
+      let photoUrl: string;
+      try {
+        photoUrl = await getPhotoStorage().uploadAssessorPhoto(id, resized);
+      } catch (err) {
+        app.log.error({ err, assessorId: id }, "Falha ao gravar foto no storage");
+        return reply
+          .status(500)
+          .send({ error: "Falha ao armazenar foto" } as never);
+      }
 
-      const fileName = `${id}.jpg`;
-      await writeFile(join(assessorsDir, fileName), resized);
-
-      const photoUrl = `/uploads/assessors/${fileName}`;
       const updated = await app.prisma.assessor.update({
         where: { id },
         data: { photoUrl },

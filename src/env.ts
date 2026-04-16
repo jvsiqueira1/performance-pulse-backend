@@ -17,6 +17,14 @@ const envSchema = z.object({
   UPLOAD_DIR: z.string().default("./uploads"),
   MAX_UPLOAD_SIZE_MB: z.coerce.number().int().positive().default(10),
 
+  // Cloudflare R2 (opcional — se R2_BUCKET vazio, usa storage local via UPLOAD_DIR)
+  R2_ACCOUNT_ID: z.string().optional(),
+  R2_ACCESS_KEY_ID: z.string().optional(),
+  R2_SECRET_ACCESS_KEY: z.string().optional(),
+  R2_BUCKET: z.string().optional(),
+  R2_PUBLIC_URL: z.string().url().optional(),
+  R2_ENDPOINT: z.string().url().optional(),
+
   OPENROUTER_API_KEY: z.string().optional(),
   OPENROUTER_MODEL: z.string().default("google/gemini-2.5-flash"),
 
