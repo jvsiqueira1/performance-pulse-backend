@@ -13,6 +13,7 @@ COPY tsconfig.json ./
 COPY prisma.config.ts ./
 COPY src ./src
 COPY prisma ./prisma
+COPY scripts ./scripts
 
 # Gerar cliente Prisma 7 (dummy URL — generate só precisa do schema)
 RUN DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy" npx prisma generate
@@ -31,6 +32,7 @@ RUN apk add --no-cache vips-dev
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/src ./src
 COPY --from=builder /app/prisma ./prisma
+COPY --from=builder /app/scripts ./scripts
 COPY --from=builder /app/prisma.config.ts ./prisma.config.ts
 COPY --from=builder /app/tsconfig.json ./tsconfig.json
 COPY --from=builder /app/package.json ./package.json
