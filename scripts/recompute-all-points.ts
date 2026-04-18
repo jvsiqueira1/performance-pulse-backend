@@ -36,7 +36,7 @@ async function main() {
 
   console.log("🔎 Buscando todas as MetricEntries...");
   const entries = await prisma.metricEntry.findMany({
-    include: { kpi: true },
+    include: { kpi: { include: { scoringRule: true } } },
     orderBy: { date: "asc" },
   });
 
@@ -71,6 +71,15 @@ async function main() {
         goal,
         e.rawValue,
         e.baseValue,
+        e.kpi.scoringRule && e.kpi.scoringRule.active
+          ? {
+              ruleType: e.kpi.scoringRule.ruleType,
+              divisor: e.kpi.scoringRule.divisor,
+              pointsPerBucket: e.kpi.scoringRule.pointsPerBucket,
+              thresholdPct: e.kpi.scoringRule.thresholdPct,
+              thresholdPoints: e.kpi.scoringRule.thresholdPoints,
+            }
+          : null,
       );
 
       // Re-detecta markers de reunião nas notes (sobrescreve o cálculo padrão)

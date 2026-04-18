@@ -22,18 +22,36 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../src/generated/prisma/client.js";
 import { env } from "../src/env.js";
 
-const KPI_DEFS = [
-  { key: "leads",                label: "Leads",          unit: "",  inputMode: "ABSOLUTE" as const,           defaultTarget: 10, sortOrder: 1, period: "WEEKLY" as const },
-  { key: "cadencia",             label: "Cadência",       unit: "%", inputMode: "QUANTITY_OVER_BASE" as const, defaultTarget: 70, sortOrder: 2, baseSource: "listSize", period: "DAILY" as const },
-  { key: "ligacoes",             label: "Ligações",       unit: "",  inputMode: "ABSOLUTE" as const,           defaultTarget: 30, sortOrder: 3, period: "DAILY" as const },
-  { key: "reunioes",             label: "Reuniões Ag.",   unit: "",  inputMode: "ABSOLUTE" as const,           defaultTarget: 3,  sortOrder: 4, period: "DAILY" as const },
-  { key: "reunioes_realizadas",  label: "Reuniões Real.", unit: "",  inputMode: "ABSOLUTE" as const,           defaultTarget: 2,  sortOrder: 5, period: "DAILY" as const },
-  { key: "touchpoint",           label: "Touch Point",    unit: "%", inputMode: "QUANTITY_OVER_BASE" as const, defaultTarget: 70, sortOrder: 6, baseSource: "totalClients", period: "DAILY" as const },
-  { key: "ativacao_conta",       label: "Ativação Conta", unit: "",  inputMode: "ABSOLUTE" as const,           defaultTarget: 1,  sortOrder: 7, period: "DAILY" as const },
-  { key: "indicacoes",           label: "Indicações",     unit: "",  inputMode: "ABSOLUTE" as const,           defaultTarget: 5,  sortOrder: 8, period: "WEEKLY" as const },
-  { key: "boletos",              label: "Boletas",        unit: "",  inputMode: "ABSOLUTE" as const,           defaultTarget: 10, sortOrder: 9, period: "DAILY" as const },
-  { key: "conversaoReuniao",     label: "Conv. Reunião",  unit: "%", inputMode: "PERCENT" as const,            defaultTarget: 20, sortOrder: 10, isDerived: true, derivedFormula: "reunioes / ligacoes", period: "WEEKLY" as const },
-  { key: "conversaoFechamento",  label: "Conv. Fechamento", unit: "%", inputMode: "PERCENT" as const,         defaultTarget: 30, sortOrder: 11, isDerived: true, derivedFormula: "CLOSED_WON / reunioes", period: "WEEKLY" as const },
+// Tabela oficial de pontuação (definida em 16/04, configurável via UI a partir de 17/04).
+// Esses valores são o BASELINE — pra mudar pesos depois, edite via Admin → Metas & KPIs.
+type RuleSpec =
+  | { type: "LINEAR"; divisor: number; pointsPerBucket: number }
+  | { type: "THRESHOLD_PERCENT"; thresholdPct: number; thresholdPoints: number };
+
+const KPI_DEFS: Array<{
+  key: string;
+  label: string;
+  unit: string;
+  inputMode: "ABSOLUTE" | "PERCENT" | "QUANTITY_OVER_BASE";
+  defaultTarget: number;
+  sortOrder: number;
+  baseSource?: string;
+  period?: "DAILY" | "WEEKLY" | "MONTHLY";
+  isDerived?: boolean;
+  derivedFormula?: string;
+  rule?: RuleSpec;
+}> = [
+  { key: "leads",                label: "Leads",          unit: "",  inputMode: "ABSOLUTE",           defaultTarget: 10, sortOrder: 1, period: "WEEKLY", rule: { type: "LINEAR", divisor: 1,  pointsPerBucket: 1 } },
+  { key: "cadencia",             label: "Cadência",       unit: "%", inputMode: "QUANTITY_OVER_BASE", defaultTarget: 70, sortOrder: 2, baseSource: "listSize", period: "DAILY", rule: { type: "THRESHOLD_PERCENT", thresholdPct: 70, thresholdPoints: 5 } },
+  { key: "ligacoes",             label: "Ligações",       unit: "",  inputMode: "ABSOLUTE",           defaultTarget: 30, sortOrder: 3, period: "DAILY", rule: { type: "LINEAR", divisor: 30, pointsPerBucket: 5 } },
+  { key: "reunioes",             label: "Reuniões Ag.",   unit: "",  inputMode: "ABSOLUTE",           defaultTarget: 3,  sortOrder: 4, period: "DAILY", rule: { type: "LINEAR", divisor: 1,  pointsPerBucket: 5 } },
+  { key: "reunioes_realizadas",  label: "Reuniões Real.", unit: "",  inputMode: "ABSOLUTE",           defaultTarget: 2,  sortOrder: 5, period: "DAILY", rule: { type: "LINEAR", divisor: 1,  pointsPerBucket: 10 } },
+  { key: "touchpoint",           label: "Touch Point",    unit: "%", inputMode: "QUANTITY_OVER_BASE", defaultTarget: 70, sortOrder: 6, baseSource: "totalClients", period: "DAILY", rule: { type: "LINEAR", divisor: 1, pointsPerBucket: 1 } },
+  { key: "ativacao_conta",       label: "Ativação Conta", unit: "",  inputMode: "ABSOLUTE",           defaultTarget: 1,  sortOrder: 7, period: "DAILY", rule: { type: "LINEAR", divisor: 1,  pointsPerBucket: 10 } },
+  { key: "indicacoes",           label: "Indicações",     unit: "",  inputMode: "ABSOLUTE",           defaultTarget: 5,  sortOrder: 8, period: "WEEKLY", rule: { type: "LINEAR", divisor: 1,  pointsPerBucket: 2.5 } },
+  { key: "boletos",              label: "Boletas",        unit: "",  inputMode: "ABSOLUTE",           defaultTarget: 10, sortOrder: 9, period: "DAILY", rule: { type: "LINEAR", divisor: 10, pointsPerBucket: 1 } },
+  { key: "conversaoReuniao",     label: "Conv. Reunião",  unit: "%", inputMode: "PERCENT",            defaultTarget: 20, sortOrder: 10, isDerived: true, derivedFormula: "reunioes / ligacoes", period: "WEEKLY" },
+  { key: "conversaoFechamento",  label: "Conv. Fechamento", unit: "%", inputMode: "PERCENT",         defaultTarget: 30, sortOrder: 11, isDerived: true, derivedFormula: "CLOSED_WON / reunioes", period: "WEEKLY" },
 ];
 
 async function main() {
@@ -53,6 +71,7 @@ async function main() {
   let created = 0;
   let updated = 0;
   let goalsUpserted = 0;
+  let rulesUpserted = 0;
 
   for (const def of KPI_DEFS) {
     const before = await prisma.kpi.findUnique({ where: { key: def.key } });
@@ -63,17 +82,17 @@ async function main() {
         label: def.label,
         unit: def.unit,
         inputMode: def.inputMode,
-        baseSource: "baseSource" in def ? def.baseSource : null,
+        baseSource: def.baseSource ?? null,
         defaultTarget: def.defaultTarget,
         sortOrder: def.sortOrder,
-        isDerived: "isDerived" in def && def.isDerived ? true : false,
-        derivedFormula: "derivedFormula" in def ? def.derivedFormula : null,
+        isDerived: def.isDerived ?? false,
+        derivedFormula: def.derivedFormula ?? null,
       },
       update: {
         label: def.label,
         unit: def.unit,
         inputMode: def.inputMode,
-        baseSource: "baseSource" in def ? def.baseSource : null,
+        baseSource: def.baseSource ?? null,
         defaultTarget: def.defaultTarget,
         sortOrder: def.sortOrder,
       },
@@ -87,7 +106,7 @@ async function main() {
     }
 
     // Goal ativa (skip se KPI é derivado)
-    if ("isDerived" in def && def.isDerived) continue;
+    if (def.isDerived) continue;
 
     const goalId = `seed-goal-${def.key}`;
     await prisma.goal.upsert({
@@ -96,23 +115,47 @@ async function main() {
         id: goalId,
         kpiId: kpi.id,
         value: def.defaultTarget,
-        period: def.period,
+        period: def.period ?? "DAILY",
         validFrom: new Date("2026-01-01"),
         validTo: null,
         createdById: admin.id,
       },
       update: {
         value: def.defaultTarget,
-        period: def.period,
+        period: def.period ?? "DAILY",
       },
     });
     goalsUpserted++;
+
+    // ScoringRule (só upsert se a regra default ainda não foi customizada).
+    // Pra evitar sobrescrever ajustes que Felipe fez via UI: se já existir
+    // rule pro KPI, deixa em paz. Pra rodar com sobrescrita, deletar rule antes.
+    if (def.rule) {
+      const existingRule = await prisma.scoringRule.findUnique({
+        where: { kpiId: kpi.id },
+      });
+      if (!existingRule) {
+        await prisma.scoringRule.create({
+          data: {
+            kpiId: kpi.id,
+            ruleType: def.rule.type,
+            divisor: def.rule.type === "LINEAR" ? def.rule.divisor : null,
+            pointsPerBucket: def.rule.type === "LINEAR" ? def.rule.pointsPerBucket : null,
+            thresholdPct: def.rule.type === "THRESHOLD_PERCENT" ? def.rule.thresholdPct : null,
+            thresholdPoints: def.rule.type === "THRESHOLD_PERCENT" ? def.rule.thresholdPoints : null,
+          },
+        });
+        rulesUpserted++;
+        console.log(`     ➕ regra default criada (${def.rule.type})`);
+      }
+    }
   }
 
   console.log(`\n──────────────────────────────────────`);
   console.log(`✅ KPIs criados:       ${created}`);
   console.log(`🔄 KPIs atualizados:   ${updated}`);
   console.log(`🎯 Goals upserted:     ${goalsUpserted}`);
+  console.log(`📐 Regras criadas:     ${rulesUpserted}`);
   console.log(`──────────────────────────────────────`);
 
   await prisma.$disconnect();
