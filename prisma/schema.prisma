@@ -146,9 +146,44 @@ model Kpi {
   goals         Goal[]
   metricEntries MetricEntry[]
   activityKpis  ActivityKpi[]
+  scoringRule   ScoringRule?
 
   @@index([active, sortOrder])
   @@map("kpis")
+}
+
+/// Regra de pontuação por KPI. Define quanto cada unidade vale.
+/// Antes era hardcoded em scoring.ts; movida pro banco em 17/04/2026 pra
+/// permitir edição via UI sem deploy.
+///
+/// Tipos:
+/// - LINEAR: pontos = floor(rawValue / divisor) * pointsPerBucket
+///   Ex: lead = 1 pt → divisor=1, pointsPerBucket=1
+///   Ex: 10 boletas = 1 pt → divisor=10, pointsPerBucket=1
+///   Ex: 30 prosp = 5 pts → divisor=30, pointsPerBucket=5
+/// - THRESHOLD_PERCENT: pontos = (convertedPercent >= thresholdPct) ? thresholdPoints : 0
+///   Ex: cadência ≥70% = 5 pts → thresholdPct=70, thresholdPoints=5
+model ScoringRule {
+  id              String          @id @default(cuid())
+  kpiId           String          @unique
+  kpi             Kpi             @relation(fields: [kpiId], references: [id], onDelete: Cascade)
+  ruleType        ScoringRuleType
+  // LINEAR fields
+  divisor         Float?          // ex: 1 pra per-unit, 10 pra "10 boletas = 1 pt"
+  pointsPerBucket Float?          // ex: 1 pra "1 ponto a cada divisor"
+  // THRESHOLD_PERCENT fields
+  thresholdPct    Float?          // ex: 70 = ≥70% da meta
+  thresholdPoints Float?          // ex: 5 pts quando atinge threshold
+  active          Boolean         @default(true)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  @@map("scoring_rules")
+}
+
+enum ScoringRuleType {
+  LINEAR
+  THRESHOLD_PERCENT
 }
 
 /// Meta historizável por KPI — suporta aplicação retroativa.
