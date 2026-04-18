@@ -40,6 +40,28 @@ const updateKpiBodySchema = z.object({
   active: z.boolean().optional(),
 });
 
+const createKpiBodySchema = z.object({
+  // key: identificador único interno (snake_case ou kebab-case sem espaços)
+  key: z
+    .string()
+    .min(2)
+    .max(40)
+    .regex(/^[a-z][a-z0-9_]*$/, "key deve ser snake_case (ex: ativacao_conta)"),
+  label: z.string().min(1).max(60),
+  unit: z.string().max(10).default(""),
+  inputMode: kpiInputModeSchema.default("ABSOLUTE"),
+  baseSource: z.string().max(40).nullable().optional(),
+  defaultTarget: z.number().min(0).default(1),
+  sortOrder: z.number().int().default(99),
+  // Goal inicial opcional. Se omitida, KPI nasce sem meta ativa.
+  goal: z
+    .object({
+      value: z.number().min(0),
+      period: goalPeriodSchema,
+    })
+    .optional(),
+});
+
 const listQuerySchema = z.object({
   active: z
     .union([z.literal("true"), z.literal("false")])
@@ -124,6 +146,65 @@ export default async function kpiRoutes(app: FastifyInstance) {
         },
       });
       return rows.map(serializeKpi);
+    },
+  );
+
+  // ─── CREATE ──────────────────────────────────────────────────────────────
+  typed.post(
+    "/api/kpis",
+    {
+      schema: {
+        description: "Cria novo KPI. Opcionalmente já cria a goal ativa.",
+        tags: ["kpis"],
+        security: [{ bearerAuth: [] }],
+        body: createKpiBodySchema,
+        response: { 201: kpiResponseSchema },
+      },
+      onRequest: [app.authenticate],
+    },
+    async (req, reply) => {
+      const { goal, ...kpiData } = req.body;
+      // Verifica se key já existe
+      const existing = await app.prisma.kpi.findUnique({
+        where: { key: kpiData.key },
+      });
+      if (existing) {
+        return reply.status(409).send({ error: "Já existe KPI com essa key" } as never);
+      }
+
+      const created = await app.prisma.kpi.create({
+        data: {
+          ...kpiData,
+          baseSource: kpiData.baseSource ?? null,
+        },
+      });
+
+      if (goal) {
+        await app.prisma.goal.create({
+          data: {
+            kpiId: created.id,
+            value: goal.value,
+            period: goal.period,
+            validFrom: new Date(),
+            validTo: null,
+            createdById: req.user.sub,
+          },
+        });
+      }
+
+      const fresh = await app.prisma.kpi.findUniqueOrThrow({
+        where: { id: created.id },
+        include: {
+          goals: {
+            where: { validTo: null },
+            orderBy: { validFrom: "desc" },
+            take: 1,
+          },
+        },
+      });
+
+      reply.status(201);
+      return serializeKpi(fresh);
     },
   );
 
