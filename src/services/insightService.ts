@@ -401,7 +401,9 @@ export async function generateInsight(
     messages: [
       { role: "user", content: prompt },
     ],
-    maxTokens: 500,
+    // Aumentado de 500 → 1500. Prompt cresceu (delta vs período anterior +
+    // projeção + penalidades + observações) e o modelo cortava na metade.
+    maxTokens: 1500,
     temperature: 0.7,
     model,
   });
@@ -657,7 +659,9 @@ ${meetingLines}
 
   const text = await app.openrouter.chat({
     messages: [{ role: "user", content: prompt }],
-    maxTokens: 600,
+    // Aumentado de 600 → 2000. Análise do TIME tem mais conteúdo (KPIs,
+    // performers top/bottom, penalidades, observações, projeções).
+    maxTokens: 2000,
     temperature: 0.7,
   });
 

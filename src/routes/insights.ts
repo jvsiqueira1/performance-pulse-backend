@@ -73,15 +73,19 @@ export default async function insightRoutes(app: FastifyInstance) {
       const userId = req.user.sub;
       const now = Date.now();
       const last = lastGeneration.get(userId) ?? 0;
-      if (now - last < RATE_LIMIT_MS) {
-        const wait = Math.ceil((RATE_LIMIT_MS - (now - last)) / 1000);
-        return reply.status(429).send({
-          error: `Rate limit: aguarde ${wait}s antes de gerar outro insight`,
-        } as never);
-      }
-
       const period = req.body.period;
       const periodKey = req.body.periodKey ?? defaultPeriodKey(period);
+
+      // Rate limit só barra se o caller forçou regeneração (force=true).
+      // Sem force, deixa passar — generateInsight vai retornar cache se houver
+      // (sem custo de IA), ou gerar pela primeira vez. Antes barrava antes do
+      // cache check, fazendo PDF/Apresentação dar 429 mesmo com cache disponível.
+      if (req.body.force && now - last < RATE_LIMIT_MS) {
+        const wait = Math.ceil((RATE_LIMIT_MS - (now - last)) / 1000);
+        return reply.status(429).send({
+          error: `Rate limit: aguarde ${wait}s antes de forçar regeneração`,
+        } as never);
+      }
 
       try {
         const result = await generateInsight(app, app.prisma, {
@@ -91,7 +95,7 @@ export default async function insightRoutes(app: FastifyInstance) {
           force: req.body.force,
         });
 
-        // Só marca rate limit se realmente chamou o modelo (não cache)
+        // Marca rate limit só se realmente chamou o modelo (não cache)
         if (!result.cached) {
           lastGeneration.set(userId, now);
         }
@@ -165,15 +169,18 @@ export default async function insightRoutes(app: FastifyInstance) {
       const userId = req.user.sub;
       const now = Date.now();
       const last = lastGeneration.get(userId) ?? 0;
-      if (now - last < RATE_LIMIT_MS) {
-        const wait = Math.ceil((RATE_LIMIT_MS - (now - last)) / 1000);
-        return reply.status(429).send({
-          error: `Rate limit: aguarde ${wait}s antes de gerar outro insight`,
-        } as never);
-      }
-
       const period = req.body.period;
       const periodKey = req.body.periodKey ?? defaultPeriodKey(period);
+
+      // Rate limit só barra se o caller forçou regeneração (force=true).
+      // Sem force, deixa cache responder. Antes barrava antes do cache check
+      // → PDF/Apresentação dava 429 logo após gerar análise no KpiAnalytics.
+      if (req.body.force && now - last < RATE_LIMIT_MS) {
+        const wait = Math.ceil((RATE_LIMIT_MS - (now - last)) / 1000);
+        return reply.status(429).send({
+          error: `Rate limit: aguarde ${wait}s antes de forçar regeneração`,
+        } as never);
+      }
 
       try {
         const result = await generateTeamInsight(app, app.prisma, {
