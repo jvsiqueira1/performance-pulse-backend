@@ -16,6 +16,7 @@ const assessorResponseSchema = z.object({
   active: z.boolean(),
   totalLeads: z.number(),
   totalClients: z.number(),
+  vacationUntil: z.string().nullable(),
   hiredAt: z.string(),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -34,6 +35,8 @@ const updateAssessorBodySchema = z.object({
   active: z.boolean().optional(),
   totalLeads: z.number().int().min(0).optional(),
   totalClients: z.number().int().min(0).optional(),
+  // Data de retorno de férias. Null/string vazia = sem férias agendadas.
+  vacationUntil: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
 });
 
 const listQuerySchema = z.object({
@@ -60,6 +63,7 @@ function serializeAssessor(a: {
   active: boolean;
   totalLeads: number;
   totalClients: number;
+  vacationUntil: Date | null;
   hiredAt: Date;
   createdAt: Date;
   updatedAt: Date;
@@ -73,6 +77,7 @@ function serializeAssessor(a: {
     active: a.active,
     totalLeads: a.totalLeads,
     totalClients: a.totalClients,
+    vacationUntil: a.vacationUntil ? a.vacationUntil.toISOString().slice(0, 10) : null,
     hiredAt: a.hiredAt.toISOString(),
     createdAt: a.createdAt.toISOString(),
     updatedAt: a.updatedAt.toISOString(),
@@ -168,9 +173,16 @@ export default async function assessorRoutes(app: FastifyInstance) {
     },
     async (req, reply) => {
       try {
+        // Converte vacationUntil string YYYY-MM-DD → Date pra Prisma.
+        const data: Record<string, unknown> = { ...req.body };
+        if (req.body.vacationUntil !== undefined) {
+          data.vacationUntil = req.body.vacationUntil
+            ? new Date(`${req.body.vacationUntil}T00:00:00.000Z`)
+            : null;
+        }
         const updated = await app.prisma.assessor.update({
           where: { id: req.params.id },
-          data: req.body,
+          data,
         });
         return serializeAssessor(updated);
       } catch {

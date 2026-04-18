@@ -25,6 +25,7 @@ export function deriveLevel(points: number): AssessorLevelEnum {
 // ─── Cálculo de campos derivados de uma MetricEntry ─────────────────────────
 
 export interface KpiConfig {
+  key: string;
   inputMode: "ABSOLUTE" | "PERCENT" | "QUANTITY_OVER_BASE";
   defaultTarget: number;
 }
@@ -39,17 +40,46 @@ export interface MetricComputation {
 }
 
 /**
- * Calcula `convertedPercent` (% de cumprimento da meta) e `pointsAwarded`
- * a partir do raw value digitado pelo gestor.
+ * Tabela oficial de pontuação por evento (definida pelo time em 16/04/2026):
  *
- * Modos:
- * - ABSOLUTE: convertedPercent = (rawValue / target) * 100
- * - PERCENT: convertedPercent = rawValue (já é percentual)
- * - QUANTITY_OVER_BASE: convertedPercent = (rawValue / baseValue) * 100
+ * - cadência ≥70% da lista = 5 pontos (threshold único, não proporcional)
+ * - 1 reunião agendada = 5 pontos
+ * - 1 reunião realizada = 10 pontos
+ * - 1 reunião c/ áreas = 5 pontos (já tratado via marker [REUNIAO_AREA] em metrics.ts)
+ * - 10 boletas = 1 ponto (a cada 10 unidades)
+ * - 1 lead gerado = 1 ponto
+ * - 30 prospecções = 5 pontos (a cada 30 ligações)
+ * - 1 TP = 1 ponto
+ * - 1 indicação = 2,5 pontos
+ * - Ativação de conta = 10 pontos
  *
- * pointsAwarded = round(min(convertedPercent, 150))
- *   - cap em 150% pra não distorcer o ranking quando alguém estoura a meta
- *   - 100% de cumprimento = 100 pts; mais simples de entender
+ * Pra qualquer KPI não listado, usa fallback proporcional à meta (cap 150).
+ */
+const POINTS_RULES: Record<
+  string,
+  (rawValue: number, baseValue: number | null) => number
+> = {
+  cadencia: (raw, base) => {
+    const pct = base && base > 0 ? (raw / base) * 100 : 0;
+    return pct >= 70 ? 5 : 0;
+  },
+  reunioes: (raw) => raw * 5,
+  reunioes_realizadas: (raw) => raw * 10,
+  boletos: (raw) => Math.floor(raw / 10) * 1,
+  leads: (raw) => raw * 1,
+  ligacoes: (raw) => Math.floor(raw / 30) * 5,
+  touchpoint: (raw) => raw * 1,
+  indicacoes: (raw) => raw * 2.5,
+  ativacao_conta: (raw) => raw * 10,
+};
+
+/**
+ * Calcula `convertedPercent` (% real de cumprimento da meta) e
+ * `pointsAwarded` (gamificação por evento, conforme tabela oficial).
+ *
+ * Antes de 16/04/2026 ambos eram derivados da mesma fórmula proporcional
+ * (pointsAwarded = round(min(150, convertedPercent))). A reunião decidiu
+ * separar: pontos viram tabela por evento; % continua sendo cumprimento real.
  */
 export function computeMetricFields(
   kpi: KpiConfig,
@@ -72,7 +102,12 @@ export function computeMetricFields(
       break;
   }
 
-  const pointsAwarded = Math.round(Math.min(Math.max(convertedPercent, 0), 150));
+  // Pontos: usa tabela oficial. Fallback (KPI desconhecido): proporcional cap 150.
+  const rule = POINTS_RULES[kpi.key];
+  const pointsAwarded = rule
+    ? Math.max(0, rule(rawValue, baseValue))
+    : Math.round(Math.min(Math.max(convertedPercent, 0), 150));
+
   return { convertedPercent, pointsAwarded };
 }
 
@@ -88,10 +123,15 @@ export interface MetricEntryForRollup {
 }
 
 export interface AssessorRollup {
-  /** Soma de pointsAwarded no período. */
+  /** Soma de pointsAwarded no período (gamificação, tabela por evento). */
   points: number;
   /**
-   * Soma de convertedPercent capped em 150. Reflete esforço cumulativo.
+   * % real de cumprimento da meta no período: média dos convertedPercent
+   * por KPI registrado, cap 100. Reflete "quanto da meta foi batido", não
+   * a soma de pontos. Antes de 16/04/2026 era soma cap 150 (confundia com pts).
+   *
+   * Mantém o nome `weeklyGoalPercent` por compatibilidade com a UI/tipos do
+   * frontend (vários componentes consomem esse campo).
    */
   weeklyGoalPercent: number;
   /** Dias consecutivos contando pra trás da data de referência. */
@@ -124,13 +164,27 @@ export function computeAssessorRollup(
 ): AssessorRollup {
   const points = entries.reduce((sum, e) => sum + (e.pointsAwarded ?? 0), 0);
 
-  // Soma de convertedPercents (não média): quem registra mais KPIs cumulativamente
-  // tem % maior. Cap 150 pra não distorcer caso de overshoot extremo.
-  const totalPercent = entries.reduce(
-    (sum, e) => sum + Math.max(0, e.convertedPercent ?? 0),
-    0,
-  );
-  const weeklyGoalPercent = Math.round(Math.min(150, totalPercent));
+  // % real de cumprimento da meta: média dos convertedPercent por KPI ÚNICO
+  // (não soma de todas entries). Capa cada KPI individualmente em 100% pra não
+  // permitir um KPI estourado compensar outros. Resultado: 0-100.
+  // Ex: ligações 70%, reuniões 100%, leads 50% → (70+100+50)/3 = 73%.
+  const percentByKpi = new Map<string, { total: number; count: number }>();
+  for (const e of entries) {
+    if (e.convertedPercent === null) continue;
+    const k = e.kpi.key;
+    const current = percentByKpi.get(k) ?? { total: 0, count: 0 };
+    current.total += Math.min(100, Math.max(0, e.convertedPercent));
+    current.count += 1;
+    percentByKpi.set(k, current);
+  }
+  const kpiAverages: number[] = [];
+  for (const { total, count } of percentByKpi.values()) {
+    kpiAverages.push(count > 0 ? total / count : 0);
+  }
+  const weeklyGoalPercent =
+    kpiAverages.length > 0
+      ? Math.round(kpiAverages.reduce((a, b) => a + b, 0) / kpiAverages.length)
+      : 0;
 
   const dayStrs = new Set(entries.map((e) => formatDateOnly(e.date)));
 

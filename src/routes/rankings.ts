@@ -71,7 +71,11 @@ export default async function rankingRoutes(app: FastifyInstance) {
       const date = req.query.date ? parseDateOnly(req.query.date) : todayInAppTz();
 
       const assessors = await app.prisma.assessor.findMany({
-        where: { active: true },
+        where: {
+          active: true,
+          // Esconde quem está em férias (vacationUntil >= hoje)
+          OR: [{ vacationUntil: null }, { vacationUntil: { lt: date } }],
+        },
         include: {
           metricEntries: {
             where: { date },
@@ -138,7 +142,11 @@ export default async function rankingRoutes(app: FastifyInstance) {
       const end = getWeekEnd(reference);
 
       const assessors = await app.prisma.assessor.findMany({
-        where: { active: true },
+        where: {
+          active: true,
+          // Esconde quem está em férias durante TODA a semana (vacationUntil >= end)
+          OR: [{ vacationUntil: null }, { vacationUntil: { lt: end } }],
+        },
         include: {
           metricEntries: {
             where: { date: { gte: start, lte: end } },

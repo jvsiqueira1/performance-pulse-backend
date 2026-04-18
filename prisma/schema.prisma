@@ -101,17 +101,18 @@ model User {
 /// Representante de vendas (entidade gerenciada, sem login).
 /// points, streak, weeklyGoalPercent, kpis.* são DERIVADOS de MetricEntry.
 model Assessor {
-  id           String        @id @default(cuid())
-  name         String
-  initials     String
-  photoUrl     String?
-  level        AssessorLevel @default(BRONZE)
-  active       Boolean       @default(true)
-  totalLeads   Int           @default(0)
-  totalClients Int           @default(0)
-  hiredAt      DateTime      @default(now())
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
+  id            String        @id @default(cuid())
+  name          String
+  initials      String
+  photoUrl      String?
+  level         AssessorLevel @default(BRONZE)
+  active        Boolean       @default(true)
+  totalLeads    Int           @default(0)
+  totalClients  Int           @default(0)
+  vacationUntil DateTime?     @db.Date
+  hiredAt       DateTime      @default(now())
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
 
   metricEntries     MetricEntry[]
   badgeUnlocks      BadgeUnlock[]
