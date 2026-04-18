@@ -95,6 +95,16 @@ const createKpiBodySchema = z.object({
       period: goalPeriodSchema,
     })
     .optional(),
+  // Regra de pontuação inicial opcional. Se omitida, cai no fallback proporcional.
+  scoringRule: z
+    .object({
+      ruleType: scoringRuleTypeSchema,
+      divisor: z.number().min(0).nullable().optional(),
+      pointsPerBucket: z.number().nullable().optional(),
+      thresholdPct: z.number().min(0).max(150).nullable().optional(),
+      thresholdPoints: z.number().nullable().optional(),
+    })
+    .optional(),
 });
 
 const listQuerySchema = z.object({
@@ -219,7 +229,7 @@ export default async function kpiRoutes(app: FastifyInstance) {
       onRequest: [app.authenticate],
     },
     async (req, reply) => {
-      const { goal, ...kpiData } = req.body;
+      const { goal, scoringRule, ...kpiData } = req.body;
       // Verifica se key já existe
       const existing = await app.prisma.kpi.findUnique({
         where: { key: kpiData.key },
@@ -244,6 +254,19 @@ export default async function kpiRoutes(app: FastifyInstance) {
             validFrom: new Date(),
             validTo: null,
             createdById: req.user.sub,
+          },
+        });
+      }
+
+      if (scoringRule) {
+        await app.prisma.scoringRule.create({
+          data: {
+            kpiId: created.id,
+            ruleType: scoringRule.ruleType,
+            divisor: scoringRule.divisor ?? null,
+            pointsPerBucket: scoringRule.pointsPerBucket ?? null,
+            thresholdPct: scoringRule.thresholdPct ?? null,
+            thresholdPoints: scoringRule.thresholdPoints ?? null,
           },
         });
       }
