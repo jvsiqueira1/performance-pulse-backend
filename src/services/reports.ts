@@ -135,16 +135,62 @@ export interface ActivityFeedItem {
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-function activeGoalValue(
-  goals: Array<{ value: number; validFrom: Date; validTo: Date | null }>,
-  ref: Date,
-  fallback: number,
-): number {
-  // Encontra a goal ativa em ref: validFrom <= ref && (validTo null OR validTo > ref)
+type GoalRow = { value: number; period?: string; validFrom: Date; validTo: Date | null };
+
+function activeGoalValue(goals: GoalRow[], ref: Date, fallback: number): number {
   const active = goals.find(
     (g) => g.validFrom <= ref && (g.validTo === null || g.validTo > ref),
   );
   return active?.value ?? fallback;
+}
+
+/** Retorna goal ativa completa (value + period) pra cálculo correto de target agregado. */
+function findActiveGoal(
+  goals: GoalRow[],
+  ref: Date,
+): { value: number; period: "DAILY" | "WEEKLY" | "MONTHLY" } | null {
+  const active = goals.find(
+    (g) => g.validFrom <= ref && (g.validTo === null || g.validTo > ref),
+  );
+  if (!active) return null;
+  return {
+    value: active.value,
+    period: (active.period as "DAILY" | "WEEKLY" | "MONTHLY") ?? "DAILY",
+  };
+}
+
+/**
+ * Calcula a meta agregada do time pro período, respeitando:
+ * - goal.period: WEEKLY/MONTHLY não devem ser multiplicados por dias
+ * - kpi.inputMode: PERCENT e QUANTITY_OVER_BASE têm target como % threshold,
+ *   não como soma absoluta agregável. Retornam o threshold como-é.
+ */
+function computeAggregatedTarget(params: {
+  goalValue: number;
+  goalPeriod: "DAILY" | "WEEKLY" | "MONTHLY" | null;
+  inputMode: "ABSOLUTE" | "PERCENT" | "QUANTITY_OVER_BASE";
+  days: number;
+  teamSize: number;
+}): number {
+  const { goalValue, goalPeriod, inputMode, days, teamSize } = params;
+  // % threshold: não escala
+  if (inputMode === "PERCENT" || inputMode === "QUANTITY_OVER_BASE") {
+    return goalValue;
+  }
+  // ABSOLUTE: escala por período × tamanho do time
+  let periodMultiplier: number;
+  switch (goalPeriod) {
+    case "WEEKLY":
+      periodMultiplier = Math.max(1, days / 7);
+      break;
+    case "MONTHLY":
+      periodMultiplier = Math.max(1, days / 30);
+      break;
+    case "DAILY":
+    default:
+      periodMultiplier = days;
+  }
+  return goalValue * periodMultiplier * teamSize;
 }
 
 function bucketTarget(
@@ -256,15 +302,39 @@ export async function buildOverview(
 
   // Agregação por kpi
   const dayBuckets = buildDateBuckets(params.from, params.to, "day");
+  const teamSize = allAssessors.length || 1;
+  const days = dayBuckets.length;
   const byKpi: OverviewByKpiEntry[] = allKpis.map((kpi) => {
     const allEntries = allAssessors.flatMap((a) =>
       a.metricEntries.filter((e) => e.kpiId === kpi.id),
     );
     const actual = allEntries.reduce((acc, e) => acc + e.rawValue, 0);
-    const dailyTarget = activeGoalValue(kpi.goals, params.to, kpi.defaultTarget);
-    const teamSize = allAssessors.length || 1;
-    const days = dayBuckets.length;
-    const target = dailyTarget * days * teamSize;
+
+    const activeGoal = findActiveGoal(kpi.goals, params.to);
+    const goalValue = activeGoal?.value ?? kpi.defaultTarget;
+    const target = computeAggregatedTarget({
+      goalValue,
+      goalPeriod: activeGoal?.period ?? null,
+      inputMode: kpi.inputMode as "ABSOLUTE" | "PERCENT" | "QUANTITY_OVER_BASE",
+      days,
+      teamSize,
+    });
+
+    // % de cumprimento:
+    // - ABSOLUTE: actual / target absoluto
+    // - PERCENT/QUANTITY_OVER_BASE: média dos convertedPercent das entries (% real)
+    let percent: number;
+    if (kpi.inputMode === "ABSOLUTE") {
+      percent = target > 0 ? (actual / target) * 100 : 0;
+    } else {
+      const validPercents = allEntries
+        .map((e) => e.convertedPercent)
+        .filter((v): v is number => v !== null);
+      percent =
+        validPercents.length > 0
+          ? validPercents.reduce((a, b) => a + b, 0) / validPercents.length
+          : 0;
+    }
 
     // Série diária: sum rawValue por dia
     const series = dayBuckets.map((b) => {
@@ -281,7 +351,7 @@ export async function buildOverview(
       unit: kpi.unit,
       actual,
       target,
-      percent: target > 0 ? (actual / target) * 100 : 0,
+      percent,
       series,
     };
   });
@@ -350,13 +420,34 @@ export async function buildAssessorReport(
   ]);
 
   const dayBuckets = buildDateBuckets(params.from, params.to, "day");
+  const days = dayBuckets.length;
   const kpisHistory: AssessorKpiHistory[] = allKpis.map((kpi) => {
     const kpiEntries = entries.filter((e) => e.kpiId === kpi.id);
     const total = kpiEntries.reduce((acc, e) => acc + e.rawValue, 0);
-    const dailyTarget = activeGoalValue(kpi.goals, params.to, kpi.defaultTarget);
-    const days = dayBuckets.length;
-    const target = dailyTarget * days;
-    const percentOfTarget = target > 0 ? (total / target) * 100 : 0;
+
+    const activeGoal = findActiveGoal(kpi.goals, params.to);
+    const goalValue = activeGoal?.value ?? kpi.defaultTarget;
+    // Pra report individual: teamSize=1 (meta de UMA pessoa pelo período)
+    const target = computeAggregatedTarget({
+      goalValue,
+      goalPeriod: activeGoal?.period ?? null,
+      inputMode: kpi.inputMode as "ABSOLUTE" | "PERCENT" | "QUANTITY_OVER_BASE",
+      days,
+      teamSize: 1,
+    });
+
+    let percentOfTarget: number;
+    if (kpi.inputMode === "ABSOLUTE") {
+      percentOfTarget = target > 0 ? (total / target) * 100 : 0;
+    } else {
+      const validPercents = kpiEntries
+        .map((e) => e.convertedPercent)
+        .filter((v): v is number => v !== null);
+      percentOfTarget =
+        validPercents.length > 0
+          ? validPercents.reduce((a, b) => a + b, 0) / validPercents.length
+          : 0;
+    }
 
     const history = dayBuckets.map((b) => {
       const dayValue = kpiEntries
