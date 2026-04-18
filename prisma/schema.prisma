@@ -89,12 +89,13 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  metricEntries     MetricEntry[]
-  goalsCreated      Goal[]
-  betsCreated       Bet[]
-  cofreEntries      CofreEntry[]
-  prizesAwarded     Prize[]
-  directionsWritten DailyDirection[]
+  metricEntries       MetricEntry[]
+  goalsCreated        Goal[]
+  betsCreated         Bet[]
+  cofreEntries        CofreEntry[]
+  prizesAwarded       Prize[]
+  directionsWritten   DailyDirection[]
+  announcementsAuthor Announcement[]
 
   @@map("users")
 }
@@ -481,4 +482,23 @@ model DailyDirection {
 
   @@index([date])
   @@map("daily_directions")
+}
+
+/// Avisos manuais que rolam no AnnouncementTicker do dashboard.
+/// Independentes das mensagens auto-geradas (líder, streaks, etc).
+/// Felipe edita via Admin → Avisos.
+model Announcement {
+  id          String    @id @default(cuid())
+  message     String
+  emoji       String?
+  active      Boolean   @default(true)
+  expiresAt   DateTime?
+  sortOrder   Int       @default(0)
+  createdById String
+  createdBy   User      @relation(fields: [createdById], references: [id])
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([active, sortOrder])
+  @@map("announcements")
 }
