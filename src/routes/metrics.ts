@@ -43,6 +43,9 @@ const upsertMetricBodySchema = z.object({
   rawValue: z.number().min(0),
   baseValue: z.number().min(0).optional(),
   notes: z.string().max(500).optional(),
+  /** Opcional: vincula a entry a uma activity. Se houver targetOverride no
+   *  ActivityKpi correspondente, ele sobrescreve a meta padrão. */
+  activityId: z.string().optional(),
 });
 
 const patchMetricBodySchema = z.object({
@@ -113,7 +116,8 @@ export default async function metricRoutes(app: FastifyInstance) {
       onRequest: [app.authenticate],
     },
     async (req, reply) => {
-      const { assessorId, kpiKey, kpiId, date, rawValue, baseValue, notes } = req.body;
+      const { assessorId, kpiKey, kpiId, date, rawValue, baseValue, notes, activityId } =
+        req.body;
       const enteredById = req.user.sub;
 
       if (!kpiKey && !kpiId) {
@@ -143,10 +147,22 @@ export default async function metricRoutes(app: FastifyInstance) {
         orderBy: { validFrom: "desc" },
       });
 
+      // Override por atividade: se entry vinculada a uma activity e existir
+      // ActivityKpi com targetOverride não-nulo, ele sobrescreve a meta padrão.
+      let effectiveGoal = activeGoal;
+      if (activityId) {
+        const activityKpi = await app.prisma.activityKpi.findUnique({
+          where: { activityId_kpiId: { activityId, kpiId: kpi.id } },
+        });
+        if (activityKpi?.targetOverride !== undefined && activityKpi?.targetOverride !== null) {
+          effectiveGoal = { value: activityKpi.targetOverride } as typeof activeGoal;
+        }
+      }
+
       // Calcular campos derivados
       const computed = computeMetricFields(
         kpi,
-        activeGoal,
+        effectiveGoal,
         rawValue,
         baseValue ?? null,
       );
@@ -173,7 +189,7 @@ export default async function metricRoutes(app: FastifyInstance) {
         convertedPercent = null;
       }
 
-      // Manual upsert: findFirst em (assessorId, kpiId, date) com activityId=null
+      // Manual upsert: findFirst em (assessorId, kpiId, activityId, date)
       // (Postgres trata NULL como distinct em UNIQUE, então não dá pra usar
       // o upsert nativo do Prisma com a chave composta)
       const existing = await app.prisma.metricEntry.findFirst({
@@ -181,7 +197,7 @@ export default async function metricRoutes(app: FastifyInstance) {
           assessorId,
           kpiId: kpi.id,
           date: targetDate,
-          activityId: null,
+          activityId: activityId ?? null,
         },
       });
 
@@ -205,7 +221,7 @@ export default async function metricRoutes(app: FastifyInstance) {
           data: {
             assessorId,
             kpiId: kpi.id,
-            activityId: null,
+            activityId: activityId ?? null,
             date: targetDate,
             rawValue,
             baseValue: baseValue ?? null,
