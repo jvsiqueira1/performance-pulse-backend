@@ -89,11 +89,12 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  metricEntries MetricEntry[]
-  goalsCreated  Goal[]
-  betsCreated   Bet[]
-  cofreEntries  CofreEntry[]
-  prizesAwarded Prize[]
+  metricEntries     MetricEntry[]
+  goalsCreated      Goal[]
+  betsCreated       Bet[]
+  cofreEntries      CofreEntry[]
+  prizesAwarded     Prize[]
+  directionsWritten DailyDirection[]
 
   @@map("users")
 }
@@ -430,4 +431,19 @@ model SystemConfig {
   updatedAt   DateTime @updatedAt
 
   @@map("system_config")
+}
+
+/// Direcionamento diário editável (foco do dia, orientações do coordenador).
+/// Um registro por data — UPSERT no PUT /api/directions/:date.
+model DailyDirection {
+  id          String   @id @default(cuid())
+  date        DateTime @unique @db.Date
+  text        String
+  createdById String
+  createdBy   User     @relation(fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([date])
+  @@map("daily_directions")
 }

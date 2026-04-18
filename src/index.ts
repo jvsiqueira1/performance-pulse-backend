@@ -24,6 +24,7 @@ import userRoutes from "./routes/users.js";
 import insightRoutes from "./routes/insights.js";
 import streamRoutes from "./routes/stream.js";
 import prizeRoutes from "./routes/prizes.js";
+import directionRoutes from "./routes/directions.js";
 import openrouterPlugin from "./plugins/openrouter.js";
 
 async function buildApp() {
@@ -76,6 +77,7 @@ async function buildApp() {
   await app.register(insightRoutes);
   await app.register(streamRoutes);
   await app.register(prizeRoutes);
+  await app.register(directionRoutes);
 
   return app;
 }
