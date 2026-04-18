@@ -40,52 +40,56 @@ export interface MetricComputation {
 }
 
 /**
- * Tabela oficial de pontuação por evento (definida pelo time em 16/04/2026):
- *
- * - cadência ≥70% da lista = 5 pontos (threshold único, não proporcional)
- * - 1 reunião agendada = 5 pontos
- * - 1 reunião realizada = 10 pontos
- * - 1 reunião c/ áreas = 5 pontos (já tratado via marker [REUNIAO_AREA] em metrics.ts)
- * - 10 boletas = 1 ponto (a cada 10 unidades)
- * - 1 lead gerado = 1 ponto
- * - 30 prospecções = 5 pontos (a cada 30 ligações)
- * - 1 TP = 1 ponto
- * - 1 indicação = 2,5 pontos
- * - Ativação de conta = 10 pontos
- *
- * Pra qualquer KPI não listado, usa fallback proporcional à meta (cap 150).
+ * Regra de pontuação por KPI (espelha o model ScoringRule do Prisma).
+ * Quando passada pra computeMetricFields, sobrescreve o fallback proporcional.
  */
-const POINTS_RULES: Record<
-  string,
-  (rawValue: number, baseValue: number | null) => number
-> = {
-  cadencia: (raw, base) => {
-    const pct = base && base > 0 ? (raw / base) * 100 : 0;
-    return pct >= 70 ? 5 : 0;
-  },
-  reunioes: (raw) => raw * 5,
-  reunioes_realizadas: (raw) => raw * 10,
-  boletos: (raw) => Math.floor(raw / 10) * 1,
-  leads: (raw) => raw * 1,
-  ligacoes: (raw) => Math.floor(raw / 30) * 5,
-  touchpoint: (raw) => raw * 1,
-  indicacoes: (raw) => raw * 2.5,
-  ativacao_conta: (raw) => raw * 10,
-};
+export interface ScoringRuleConfig {
+  ruleType: "LINEAR" | "THRESHOLD_PERCENT";
+  divisor?: number | null;
+  pointsPerBucket?: number | null;
+  thresholdPct?: number | null;
+  thresholdPoints?: number | null;
+}
+
+/**
+ * Aplica uma ScoringRule e retorna pontos.
+ * - LINEAR: floor(raw / divisor) * pointsPerBucket
+ * - THRESHOLD_PERCENT: convertedPercent >= thresholdPct ? thresholdPoints : 0
+ */
+function applyScoringRule(
+  rule: ScoringRuleConfig,
+  rawValue: number,
+  convertedPercent: number,
+): number {
+  if (rule.ruleType === "LINEAR") {
+    const divisor = rule.divisor ?? 1;
+    const pointsPerBucket = rule.pointsPerBucket ?? 0;
+    if (divisor <= 0) return 0;
+    return Math.floor(rawValue / divisor) * pointsPerBucket;
+  }
+  // THRESHOLD_PERCENT
+  const threshold = rule.thresholdPct ?? 0;
+  const points = rule.thresholdPoints ?? 0;
+  return convertedPercent >= threshold ? points : 0;
+}
 
 /**
  * Calcula `convertedPercent` (% real de cumprimento da meta) e
- * `pointsAwarded` (gamificação por evento, conforme tabela oficial).
+ * `pointsAwarded` (gamificação por evento, vinda da ScoringRule do banco).
  *
- * Antes de 16/04/2026 ambos eram derivados da mesma fórmula proporcional
- * (pointsAwarded = round(min(150, convertedPercent))). A reunião decidiu
- * separar: pontos viram tabela por evento; % continua sendo cumprimento real.
+ * Histórico:
+ * - Antes de 16/04: pointsAwarded = round(min(150, convertedPercent)) (proporcional)
+ * - 16/04: tabela hardcoded por kpi.key em scoring.ts
+ * - 17/04: tabela movida pro banco (model ScoringRule), editável via UI
+ *
+ * Sem rule → fallback proporcional cap 150 (compat).
  */
 export function computeMetricFields(
   kpi: KpiConfig,
   activeGoal: GoalConfig | null,
   rawValue: number,
   baseValue: number | null,
+  scoringRule?: ScoringRuleConfig | null,
 ): MetricComputation {
   const target = activeGoal?.value ?? kpi.defaultTarget;
   let convertedPercent: number;
@@ -102,10 +106,8 @@ export function computeMetricFields(
       break;
   }
 
-  // Pontos: usa tabela oficial. Fallback (KPI desconhecido): proporcional cap 150.
-  const rule = POINTS_RULES[kpi.key];
-  const pointsAwarded = rule
-    ? Math.max(0, rule(rawValue, baseValue))
+  const pointsAwarded = scoringRule
+    ? Math.max(0, applyScoringRule(scoringRule, rawValue, convertedPercent))
     : Math.round(Math.min(Math.max(convertedPercent, 0), 150));
 
   return { convertedPercent, pointsAwarded };

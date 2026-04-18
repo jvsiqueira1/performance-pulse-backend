@@ -4,6 +4,7 @@ import { z } from "zod";
 
 const kpiInputModeSchema = z.enum(["ABSOLUTE", "PERCENT", "QUANTITY_OVER_BASE"]);
 const goalPeriodSchema = z.enum(["DAILY", "WEEKLY", "MONTHLY"]);
+const scoringRuleTypeSchema = z.enum(["LINEAR", "THRESHOLD_PERCENT"]);
 
 const activeGoalSchema = z
   .object({
@@ -12,6 +13,17 @@ const activeGoalSchema = z
     period: goalPeriodSchema,
     validFrom: z.string(),
     validTo: z.string().nullable(),
+  })
+  .nullable();
+
+const scoringRuleSchema = z
+  .object({
+    ruleType: scoringRuleTypeSchema,
+    divisor: z.number().nullable(),
+    pointsPerBucket: z.number().nullable(),
+    thresholdPct: z.number().nullable(),
+    thresholdPoints: z.number().nullable(),
+    active: z.boolean(),
   })
   .nullable();
 
@@ -28,7 +40,30 @@ const kpiResponseSchema = z.object({
   sortOrder: z.number(),
   active: z.boolean(),
   activeGoal: activeGoalSchema,
+  scoringRule: scoringRuleSchema,
 });
+
+const upsertScoringRuleBodySchema = z
+  .object({
+    ruleType: scoringRuleTypeSchema,
+    divisor: z.number().min(0).nullable().optional(),
+    pointsPerBucket: z.number().nullable().optional(),
+    thresholdPct: z.number().min(0).max(150).nullable().optional(),
+    thresholdPoints: z.number().nullable().optional(),
+    active: z.boolean().optional().default(true),
+  })
+  .refine(
+    (v) =>
+      v.ruleType !== "LINEAR" ||
+      (v.divisor != null && v.divisor > 0 && v.pointsPerBucket != null),
+    { message: "LINEAR requer divisor > 0 e pointsPerBucket" },
+  )
+  .refine(
+    (v) =>
+      v.ruleType !== "THRESHOLD_PERCENT" ||
+      (v.thresholdPct != null && v.thresholdPoints != null),
+    { message: "THRESHOLD_PERCENT requer thresholdPct e thresholdPoints" },
+  );
 
 const updateKpiBodySchema = z.object({
   label: z.string().min(1).max(60).optional(),
@@ -88,6 +123,14 @@ type KpiRow = {
     validFrom: Date;
     validTo: Date | null;
   }>;
+  scoringRule: {
+    ruleType: string;
+    divisor: number | null;
+    pointsPerBucket: number | null;
+    thresholdPct: number | null;
+    thresholdPoints: number | null;
+    active: boolean;
+  } | null;
 };
 
 function serializeKpi(row: KpiRow) {
@@ -113,8 +156,27 @@ function serializeKpi(row: KpiRow) {
           validTo: activeGoalRow.validTo ? activeGoalRow.validTo.toISOString() : null,
         }
       : null,
+    scoringRule: row.scoringRule
+      ? {
+          ruleType: row.scoringRule.ruleType as "LINEAR" | "THRESHOLD_PERCENT",
+          divisor: row.scoringRule.divisor,
+          pointsPerBucket: row.scoringRule.pointsPerBucket,
+          thresholdPct: row.scoringRule.thresholdPct,
+          thresholdPoints: row.scoringRule.thresholdPoints,
+          active: row.scoringRule.active,
+        }
+      : null,
   };
 }
+
+const KPI_INCLUDE = {
+  goals: {
+    where: { validTo: null },
+    orderBy: { validFrom: "desc" as const },
+    take: 1,
+  },
+  scoringRule: true,
+} as const;
 
 export default async function kpiRoutes(app: FastifyInstance) {
   const typed = app.withTypeProvider<ZodTypeProvider>();
@@ -137,13 +199,7 @@ export default async function kpiRoutes(app: FastifyInstance) {
       const rows = await app.prisma.kpi.findMany({
         where: active === undefined ? undefined : { active },
         orderBy: [{ sortOrder: "asc" }, { key: "asc" }],
-        include: {
-          goals: {
-            where: { validTo: null },
-            orderBy: { validFrom: "desc" },
-            take: 1,
-          },
-        },
+        include: KPI_INCLUDE,
       });
       return rows.map(serializeKpi);
     },
@@ -194,13 +250,7 @@ export default async function kpiRoutes(app: FastifyInstance) {
 
       const fresh = await app.prisma.kpi.findUniqueOrThrow({
         where: { id: created.id },
-        include: {
-          goals: {
-            where: { validTo: null },
-            orderBy: { validFrom: "desc" },
-            take: 1,
-          },
-        },
+        include: KPI_INCLUDE,
       });
 
       reply.status(201);
@@ -233,13 +283,53 @@ export default async function kpiRoutes(app: FastifyInstance) {
       }
       const fresh = await app.prisma.kpi.findUniqueOrThrow({
         where: { id: req.params.id },
-        include: {
-          goals: {
-            where: { validTo: null },
-            orderBy: { validFrom: "desc" },
-            take: 1,
-          },
-        },
+        include: KPI_INCLUDE,
+      });
+      return serializeKpi(fresh);
+    },
+  );
+
+  // ─── SCORING RULE: PUT (upsert) ─────────────────────────────────────────
+  typed.put(
+    "/api/kpis/:id/scoring-rule",
+    {
+      schema: {
+        description:
+          "Cria ou atualiza a regra de pontuação do KPI. Substitui POINTS_RULES hardcoded.",
+        tags: ["kpis"],
+        security: [{ bearerAuth: [] }],
+        params: z.object({ id: z.string() }),
+        body: upsertScoringRuleBodySchema,
+        response: { 200: kpiResponseSchema },
+      },
+      onRequest: [app.authenticate],
+    },
+    async (req, reply) => {
+      const kpi = await app.prisma.kpi.findUnique({
+        where: { id: req.params.id },
+      });
+      if (!kpi) {
+        return reply.status(404).send({ error: "KPI não encontrado" } as never);
+      }
+
+      const data = {
+        ruleType: req.body.ruleType,
+        divisor: req.body.divisor ?? null,
+        pointsPerBucket: req.body.pointsPerBucket ?? null,
+        thresholdPct: req.body.thresholdPct ?? null,
+        thresholdPoints: req.body.thresholdPoints ?? null,
+        active: req.body.active ?? true,
+      };
+
+      await app.prisma.scoringRule.upsert({
+        where: { kpiId: kpi.id },
+        create: { kpiId: kpi.id, ...data },
+        update: data,
+      });
+
+      const fresh = await app.prisma.kpi.findUniqueOrThrow({
+        where: { id: req.params.id },
+        include: KPI_INCLUDE,
       });
       return serializeKpi(fresh);
     },

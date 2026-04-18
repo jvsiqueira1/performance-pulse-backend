@@ -124,9 +124,10 @@ export default async function metricRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: "Informe kpiKey ou kpiId" } as never);
       }
 
-      // Resolver KPI
+      // Resolver KPI + scoring rule
       const kpi = await app.prisma.kpi.findUnique({
         where: kpiId ? { id: kpiId } : { key: kpiKey! },
+        include: { scoringRule: true },
       });
       if (!kpi) return reply.status(404).send({ error: "KPI não encontrado" } as never);
 
@@ -159,12 +160,21 @@ export default async function metricRoutes(app: FastifyInstance) {
         }
       }
 
-      // Calcular campos derivados
+      // Calcular campos derivados (passa scoring rule do banco se houver)
       const computed = computeMetricFields(
         kpi,
         effectiveGoal,
         rawValue,
         baseValue ?? null,
+        kpi.scoringRule && kpi.scoringRule.active
+          ? {
+              ruleType: kpi.scoringRule.ruleType,
+              divisor: kpi.scoringRule.divisor,
+              pointsPerBucket: kpi.scoringRule.pointsPerBucket,
+              thresholdPct: kpi.scoringRule.thresholdPct,
+              thresholdPoints: kpi.scoringRule.thresholdPoints,
+            }
+          : null,
       );
 
       // Bonus de reunião: markers no notes sobrescrevem pontos.
@@ -265,7 +275,7 @@ export default async function metricRoutes(app: FastifyInstance) {
     async (req, reply) => {
       const existing = await app.prisma.metricEntry.findUnique({
         where: { id: req.params.id },
-        include: { kpi: true },
+        include: { kpi: { include: { scoringRule: true } } },
       });
       if (!existing) {
         return reply.status(404).send({ error: "Métrica não encontrada" } as never);
@@ -289,6 +299,15 @@ export default async function metricRoutes(app: FastifyInstance) {
         activeGoal,
         newRaw,
         newBase,
+        existing.kpi.scoringRule && existing.kpi.scoringRule.active
+          ? {
+              ruleType: existing.kpi.scoringRule.ruleType,
+              divisor: existing.kpi.scoringRule.divisor,
+              pointsPerBucket: existing.kpi.scoringRule.pointsPerBucket,
+              thresholdPct: existing.kpi.scoringRule.thresholdPct,
+              thresholdPoints: existing.kpi.scoringRule.thresholdPoints,
+            }
+          : null,
       );
 
       const updated = await app.prisma.metricEntry.update({
