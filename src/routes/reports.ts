@@ -209,13 +209,12 @@ export default async function reportRoutes(app: FastifyInstance) {
     "/api/reports/overview",
     {
       schema: {
-        description: "Agregado global no período: byKpi + topPerformers + bottomPerformers",
+        description: "Agregado global no período: byKpi + topPerformers + bottomPerformers. PUBLIC — consumido pela rota /tv.",
         tags: ["reports"],
-        security: [{ bearerAuth: [] }],
         querystring: dateRangeQuerySchema,
         response: { 200: overviewResponseSchema },
       },
-      onRequest: [app.authenticate],
+      // Sem auth: usado pela TV pública (`/tv`).
     },
     async (req) => {
       const { from, to } = resolveRange(req.query.from, req.query.to);

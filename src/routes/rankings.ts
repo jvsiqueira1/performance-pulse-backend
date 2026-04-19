@@ -59,13 +59,12 @@ export default async function rankingRoutes(app: FastifyInstance) {
     {
       schema: {
         description:
-          "Ranking do dia: lista assessores ativos ordenados por pontos do dia. Default: hoje (BRT).",
+          "Ranking do dia: lista assessores ativos ordenados por pontos do dia. Default: hoje (BRT). PUBLIC — consumido pela rota /tv.",
         tags: ["rankings"],
-        security: [{ bearerAuth: [] }],
         querystring: dailyQuerySchema,
         response: { 200: dailyRankingResponseSchema },
       },
-      onRequest: [app.authenticate],
+      // Sem auth: usado pela TV pública (`/tv`) na sala de vendas.
     },
     async (req) => {
       const date = req.query.date ? parseDateOnly(req.query.date) : todayInAppTz();
@@ -126,13 +125,12 @@ export default async function rankingRoutes(app: FastifyInstance) {
     {
       schema: {
         description:
-          "Ranking da semana: lista assessores ativos ordenados por pontos acumulados na semana (segunda→domingo). Default: semana corrente (BRT).",
+          "Ranking da semana: lista assessores ativos ordenados por pontos acumulados na semana (segunda→domingo). Default: semana corrente (BRT). PUBLIC — consumido pela rota /tv.",
         tags: ["rankings"],
-        security: [{ bearerAuth: [] }],
         querystring: weeklyQuerySchema,
         response: { 200: weeklyRankingResponseSchema },
       },
-      onRequest: [app.authenticate],
+      // Sem auth: usado pela TV pública (`/tv`) na sala de vendas.
     },
     async (req) => {
       const reference = req.query.weekStart

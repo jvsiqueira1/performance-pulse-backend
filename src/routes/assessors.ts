@@ -92,13 +92,12 @@ export default async function assessorRoutes(app: FastifyInstance) {
     "/api/assessors",
     {
       schema: {
-        description: "Lista assessores",
+        description: "Lista assessores. PUBLIC — consumido pela rota /tv. Shape já não expõe email/telefone.",
         tags: ["assessors"],
-        security: [{ bearerAuth: [] }],
         querystring: listQuerySchema,
         response: { 200: z.array(assessorResponseSchema) },
       },
-      onRequest: [app.authenticate],
+      // Sem auth: usado pela TV pública (`/tv`).
     },
     async (req) => {
       const { active } = req.query;

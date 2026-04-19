@@ -196,13 +196,12 @@ export default async function kpiRoutes(app: FastifyInstance) {
     "/api/kpis",
     {
       schema: {
-        description: "Lista KPIs com a goal ativa embutida",
+        description: "Lista KPIs com a goal ativa embutida. PUBLIC — consumido pela rota /tv.",
         tags: ["kpis"],
-        security: [{ bearerAuth: [] }],
         querystring: listQuerySchema,
         response: { 200: z.array(kpiResponseSchema) },
       },
-      onRequest: [app.authenticate],
+      // Sem auth: usado pela TV pública (`/tv`).
     },
     async (req) => {
       const { active } = req.query;

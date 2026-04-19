@@ -74,13 +74,12 @@ export default async function announcementRoutes(app: FastifyInstance) {
     {
       schema: {
         description:
-          "Lista avisos manuais. Default: só ativos e não expirados. ?includeInactive=true retorna todos (pra admin).",
+          "Lista avisos manuais. Default: só ativos e não expirados. ?includeInactive=true retorna todos (pra admin). PUBLIC — consumido pela rota /tv.",
         tags: ["announcements"],
-        security: [{ bearerAuth: [] }],
         querystring: listQuerySchema,
         response: { 200: z.array(announcementResponseSchema) },
       },
-      onRequest: [app.authenticate],
+      // Sem auth: usado pela TV pública (`/tv`). Avisos são projetados pra ser exibidos publicamente.
     },
     async (req) => {
       const includeInactive = req.query.includeInactive ?? false;

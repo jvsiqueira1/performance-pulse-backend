@@ -49,12 +49,11 @@ export default async function cofreRoutes(app: FastifyInstance) {
       schema: {
         description:
           "Saldo do cofre: soma DEPOSIT − PAYOUT + ADJUSTMENT (pode ser negativo). " +
-          "Também retorna quanto cada squad ganhou (PAYOUTs vinculados a bets vencidas).",
+          "Também retorna quanto cada squad ganhou (PAYOUTs vinculados a bets vencidas). PUBLIC — consumido pela rota /tv.",
         tags: ["cofre"],
-        security: [{ bearerAuth: [] }],
         response: { 200: balanceResponseSchema },
       },
-      onRequest: [app.authenticate],
+      // Sem auth: usado pela TV pública (`/tv`).
     },
     async () => {
       const [entries, finishedBets] = await Promise.all([

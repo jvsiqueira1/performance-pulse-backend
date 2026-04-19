@@ -119,13 +119,12 @@ export default async function betRoutes(app: FastifyInstance) {
     "/api/bets",
     {
       schema: {
-        description: "Lista bets (filtro opcional por status)",
+        description: "Lista bets (filtro opcional por status). PUBLIC — consumido pela rota /tv.",
         tags: ["bets"],
-        security: [{ bearerAuth: [] }],
         querystring: listQuerySchema,
         response: { 200: z.array(betResponseSchema) },
       },
-      onRequest: [app.authenticate],
+      // Sem auth: usado pela TV pública (`/tv`).
     },
     async (req) => {
       const { status } = req.query;

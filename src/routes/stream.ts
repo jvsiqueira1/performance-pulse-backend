@@ -5,9 +5,14 @@ import { eventBus } from "../services/eventBus.js";
 /**
  * SSE endpoint pra realtime updates no Modo TV.
  *
- * EventSource não suporta Authorization header, então aceita token via
- * query param. A autenticação é feita manualmente (não usa app.authenticate
- * decorator porque ele roda em onRequest antes de podermos copiar o token).
+ * PÚBLICO — sem auth. O evento emitido é apenas "ranking:update" com
+ * timestamp (nenhum dado sensível). O cliente usa isso como sinal pra
+ * invalidar caches e re-fetch dos endpoints públicos de ranking.
+ *
+ * Consumido pela rota /tv (sem login) e pela rota / autenticada. O
+ * parâmetro `token` é aceito mas opcional — preservado por compat com
+ * a implementação anterior, que passava o JWT via query (EventSource
+ * não suporta Authorization header).
  */
 export default async function streamRoutes(app: FastifyInstance) {
   app.get(
@@ -15,26 +20,11 @@ export default async function streamRoutes(app: FastifyInstance) {
     {
       schema: {
         description:
-          "SSE stream de ranking updates. Conecte via EventSource com ?token=xxx.",
+          "SSE stream de ranking updates. PUBLIC — sem auth. " +
+          "Conecte via EventSource. Emite 'ranking:update' com timestamp; cliente deve re-fetch.",
         tags: ["stream"],
-        querystring: z.object({ token: z.string().min(1) }),
+        querystring: z.object({ token: z.string().optional() }),
       },
-      // Auth manual — não usa app.authenticate porque EventSource não manda header
-      onRequest: [
-        async (req, reply) => {
-          const token = (req.query as { token?: string }).token;
-          if (!token) {
-            return reply.status(401).send({ error: "Token ausente" } as never);
-          }
-          // Inject header pra que jwtVerify funcione
-          req.headers.authorization = `Bearer ${token}`;
-          try {
-            await req.jwtVerify();
-          } catch {
-            return reply.status(401).send({ error: "Token inválido" } as never);
-          }
-        },
-      ],
     },
     async (req, reply) => {
       // SSE headers

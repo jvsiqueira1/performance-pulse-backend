@@ -40,12 +40,11 @@ export default async function badgeRoutes(app: FastifyInstance) {
     "/api/badges",
     {
       schema: {
-        description: "Lista definições de badges ativos",
+        description: "Lista definições de badges ativos. PUBLIC — consumido pela rota /tv.",
         tags: ["badges"],
-        security: [{ bearerAuth: [] }],
         response: { 200: z.array(badgeResponseSchema) },
       },
-      onRequest: [app.authenticate],
+      // Sem auth: usado pela TV pública (`/tv`).
     },
     async () => {
       const rows = await app.prisma.badge.findMany({
@@ -68,13 +67,12 @@ export default async function badgeRoutes(app: FastifyInstance) {
     "/api/badges/unlocks",
     {
       schema: {
-        description: "Lista unlocks de badges (filtros: assessorId, squadId, periodKey)",
+        description: "Lista unlocks de badges (filtros: assessorId, squadId, periodKey). PUBLIC — consumido pela rota /tv.",
         tags: ["badges"],
-        security: [{ bearerAuth: [] }],
         querystring: unlocksQuerySchema,
         response: { 200: z.array(badgeUnlockResponseSchema) },
       },
-      onRequest: [app.authenticate],
+      // Sem auth: usado pela TV pública (`/tv`).
     },
     async (req) => {
       const { assessorId, squadId, periodKey } = req.query;

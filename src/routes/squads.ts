@@ -123,13 +123,12 @@ export default async function squadRoutes(app: FastifyInstance) {
     "/api/squads",
     {
       schema: {
-        description: "Lista squads com membros ativos embutidos",
+        description: "Lista squads com membros ativos embutidos. PUBLIC — consumido pela rota /tv.",
         tags: ["squads"],
-        security: [{ bearerAuth: [] }],
         querystring: listQuerySchema,
         response: { 200: z.array(squadResponseSchema) },
       },
-      onRequest: [app.authenticate],
+      // Sem auth: usado pela TV pública (`/tv`).
     },
     async (req) => {
       const { active } = req.query;
