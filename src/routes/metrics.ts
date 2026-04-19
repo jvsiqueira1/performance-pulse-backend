@@ -26,6 +26,8 @@ const metricResponseSchema = z.object({
   pointsAwarded: z.number().nullable(),
   enteredById: z.string(),
   notes: z.string().nullable(),
+  /// Sprint C - quando a entry foi criada/editada em data ≠ hoje (retroativa)
+  backfilledAt: z.string().nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
@@ -74,6 +76,7 @@ type MetricRow = {
   pointsAwarded: number | null;
   enteredById: string;
   notes: string | null;
+  backfilledAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
   kpi: { key: string };
@@ -93,6 +96,7 @@ function serializeMetric(m: MetricRow) {
     pointsAwarded: m.pointsAwarded,
     enteredById: m.enteredById,
     notes: m.notes,
+    backfilledAt: m.backfilledAt ? m.backfilledAt.toISOString() : null,
     createdAt: m.createdAt.toISOString(),
     updatedAt: m.updatedAt.toISOString(),
   };
@@ -137,6 +141,11 @@ export default async function metricRoutes(app: FastifyInstance) {
 
       // Resolver data
       const targetDate = date ? parseDateOnly(date) : todayInAppTz();
+
+      // Backfill detection: marca quando admin lança métrica em data ≠ hoje
+      // (Sprint C - visibilidade que Felipe pediu pra "pontuação retroativa").
+      const today = todayInAppTz();
+      const isBackfill = targetDate.getTime() !== today.getTime();
 
       // Resolver active goal pra essa data
       const activeGoal = await app.prisma.goal.findFirst({
@@ -223,6 +232,10 @@ export default async function metricRoutes(app: FastifyInstance) {
             pointsAwarded,
             notes: notes ?? null,
             enteredById,
+            // Atualiza backfilledAt só se a edição é em data ≠ hoje. Se admin
+            // edita entry de hoje, nunca marca como backfill. Se edita entry
+            // de dia passado, sempre marca (mesmo se já estava marcada antes).
+            backfilledAt: isBackfill ? new Date() : null,
           },
           include: { kpi: { select: { key: true } } },
         });
@@ -239,6 +252,7 @@ export default async function metricRoutes(app: FastifyInstance) {
             pointsAwarded,
             notes: notes ?? null,
             enteredById,
+            backfilledAt: isBackfill ? new Date() : null,
           },
           include: { kpi: { select: { key: true } } },
         });

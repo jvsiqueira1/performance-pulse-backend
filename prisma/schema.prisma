@@ -274,6 +274,11 @@ model MetricEntry {
   enteredById      String
   enteredBy        User      @relation(fields: [enteredById], references: [id])
   notes            String?
+  /// Marcado quando a entry foi criada/editada em data DIFERENTE do `date` da
+  /// métrica (Felipe pediu visibilidade pra "pontuação retroativa").
+  /// Ex: hoje 19/abr admin upserta métrica com date=15/abr → backfilledAt=now().
+  /// Null = entry registrada no próprio dia (caso normal).
+  backfilledAt     DateTime?
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 

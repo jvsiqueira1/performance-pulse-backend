@@ -169,6 +169,9 @@ const activityFeedItemSchema = z.object({
   assessorName: z.string(),
   description: z.string(),
   icon: z.string(),
+  // Sprint C - flag de retroatividade
+  backfilled: z.boolean().optional(),
+  metricDate: z.string().optional(),
 });
 
 const activityFeedQuerySchema = z.object({

@@ -131,6 +131,11 @@ export interface ActivityFeedItem {
   assessorName: string;
   description: string;
   icon: string;
+  /// Sprint C - quando true, a entrada foi registrada em data ≠ hoje
+  /// (admin lançou métrica retroativa). UI mostra badge "🕐 retroativo".
+  backfilled?: boolean;
+  /// Data original da entry (YYYY-MM-DD), pra mostrar no badge
+  metricDate?: string;
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -628,6 +633,8 @@ export async function buildActivityFeed(
         assessorName: m.assessor.name,
         description: desc,
         icon,
+        backfilled: m.backfilledAt !== null,
+        metricDate: m.date.toISOString().slice(0, 10),
       };
     }),
     ...unlocks.map<ActivityFeedItem>((u) => ({
