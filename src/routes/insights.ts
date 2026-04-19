@@ -19,6 +19,28 @@ const insightResponseSchema = z.object({
   createdAt: z.string(),
 });
 
+// Linha do histórico — inclui periodKey/periodKind pra diferenciar snapshots
+// do mesmo período (cada inputHash distinto = nova linha).
+const insightHistoryItemSchema = z.object({
+  id: z.string(),
+  textMarkdown: z.string(),
+  summary: z.string(),
+  tags: z.array(z.string()),
+  model: z.string(),
+  periodKind: insightPeriodSchema,
+  periodKey: z.string(),
+  createdAt: z.string(),
+});
+
+const insightHistoryResponseSchema = z.object({
+  items: z.array(insightHistoryItemSchema),
+});
+
+const historyQuerySchema = z.object({
+  periodKind: insightPeriodSchema.optional(),
+  limit: z.coerce.number().int().min(1).max(50).default(10),
+});
+
 const generateBodySchema = z.object({
   period: insightPeriodSchema.default("WEEK"),
   periodKey: z.string().optional(),
@@ -199,6 +221,92 @@ export default async function insightRoutes(app: FastifyInstance) {
         app.log.error({ err }, "team insight generation failed");
         return reply.status(500).send({ error: message } as never);
       }
+    },
+  );
+
+  // ─── History endpoints ───────────────────────────────────────────────────
+  // Cada inputHash distinto vira uma linha nova em AiInsight (constraint
+  // única `assessorId+periodKind+periodKey+inputHash`). Esses endpoints
+  // expõem essa timeline pra UI mostrar evolução do que a IA disse ao longo
+  // do tempo. Sem rate limit — leitura pura.
+
+  typed.get(
+    "/api/insights/assessor/:id/history",
+    {
+      schema: {
+        description:
+          "Lista insights anteriores de um assessor (cronológico desc). " +
+          "Filtra opcionalmente por periodKind. Limit default 10, max 50.",
+        tags: ["insights"],
+        security: [{ bearerAuth: [] }],
+        params: z.object({ id: z.string() }),
+        querystring: historyQuerySchema,
+        response: { 200: insightHistoryResponseSchema },
+      },
+      onRequest: [app.authenticate],
+    },
+    async (req) => {
+      const rows = await app.prisma.aiInsight.findMany({
+        where: {
+          assessorId: req.params.id,
+          ...(req.query.periodKind ? { periodKind: req.query.periodKind } : {}),
+        },
+        orderBy: { createdAt: "desc" },
+        take: req.query.limit,
+      });
+
+      return {
+        items: rows.map((r) => ({
+          id: r.id,
+          textMarkdown: r.textMarkdown,
+          summary: r.summary,
+          tags: r.tags,
+          model: r.model,
+          periodKind: r.periodKind as InsightPeriod,
+          periodKey: r.periodKey,
+          createdAt: r.createdAt.toISOString(),
+        })),
+      };
+    },
+  );
+
+  typed.get(
+    "/api/insights/team/history",
+    {
+      schema: {
+        description:
+          "Lista insights do TIME (assessorId=null, squadId=null) cronológico desc. " +
+          "Filtra opcionalmente por periodKind. Limit default 10, max 50.",
+        tags: ["insights"],
+        security: [{ bearerAuth: [] }],
+        querystring: historyQuerySchema,
+        response: { 200: insightHistoryResponseSchema },
+      },
+      onRequest: [app.authenticate],
+    },
+    async (req) => {
+      const rows = await app.prisma.aiInsight.findMany({
+        where: {
+          assessorId: null,
+          squadId: null,
+          ...(req.query.periodKind ? { periodKind: req.query.periodKind } : {}),
+        },
+        orderBy: { createdAt: "desc" },
+        take: req.query.limit,
+      });
+
+      return {
+        items: rows.map((r) => ({
+          id: r.id,
+          textMarkdown: r.textMarkdown,
+          summary: r.summary,
+          tags: r.tags,
+          model: r.model,
+          periodKind: r.periodKind as InsightPeriod,
+          periodKey: r.periodKey,
+          createdAt: r.createdAt.toISOString(),
+        })),
+      };
     },
   );
 }
