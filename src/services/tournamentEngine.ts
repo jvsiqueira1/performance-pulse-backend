@@ -140,3 +140,74 @@ export function resolvePayoutForRank(
   const val = record[String(rank)];
   return typeof val === "number" && val > 0 ? val : 0;
 }
+
+/**
+ * Finaliza um torneio: computa ranking, persiste ranks/scores, cria PAYOUTs.
+ * Retorna resumo pro caller logar ou broadcastar.
+ *
+ * Usado por:
+ * - POST /api/tournaments/:id/finish (admin manual)
+ * - Job cron auto-finish (sem admin identificado — usa createdById do torneio)
+ */
+export async function finishTournament(
+  prisma: PrismaClient,
+  betId: string,
+  /** User que disparou (admin manual) OU null pra cron (usa createdById do bet). */
+  actorUserId: string | null,
+): Promise<{ winners: string[]; payoutsCreated: number }> {
+  const bet = await prisma.bet.findUnique({
+    where: { id: betId },
+    select: { id: true, kind: true, status: true, progressivePayoutJson: true, value: true, createdById: true },
+  });
+  if (!bet) throw new Error(`Torneio ${betId} não encontrado`);
+  if (bet.kind !== "TOURNAMENT") throw new Error("Bet não é torneio");
+  if (bet.status !== "ACTIVE") throw new Error(`Torneio já ${bet.status}`);
+
+  const { scores, winners } = await computeTournamentRanking(prisma, betId);
+
+  await prisma.$transaction([
+    ...scores.map((s) =>
+      prisma.betParticipant.update({
+        where: { id: s.participantId },
+        data: { finalScore: s.score, rank: s.rank },
+      }),
+    ),
+    prisma.bet.update({
+      where: { id: bet.id },
+      data: {
+        status: "FINISHED",
+        finishedAt: new Date(),
+        winnerSquadId: (() => {
+          const topWinnerId = winners[0];
+          if (!topWinnerId) return null;
+          const top = scores.find((s) => s.participantId === topWinnerId);
+          return top?.squadId ?? null;
+        })(),
+      },
+    }),
+  ]);
+
+  // Cofre PAYOUTs
+  const payoutJson = bet.progressivePayoutJson as Record<string, number> | null;
+  const createdById = actorUserId ?? bet.createdById;
+  let payoutsCreated = 0;
+  for (const winnerId of winners) {
+    const s = scores.find((x) => x.participantId === winnerId);
+    if (!s) continue;
+    const amount = resolvePayoutForRank(payoutJson, bet.value, s.rank);
+    if (amount > 0) {
+      await prisma.cofreEntry.create({
+        data: {
+          betId: bet.id,
+          kind: "PAYOUT",
+          amount,
+          description: `Torneio · ${s.rank}º lugar · ${s.displayName}`,
+          createdById,
+        },
+      });
+      payoutsCreated++;
+    }
+  }
+
+  return { winners, payoutsCreated };
+}

@@ -2,10 +2,7 @@ import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import { eventBus } from "../services/eventBus.js";
-import {
-  computeTournamentRanking,
-  resolvePayoutForRank,
-} from "../services/tournamentEngine.js";
+import { finishTournament } from "../services/tournamentEngine.js";
 import { parseDateOnly, todayInAppTz } from "../lib/dates.js";
 
 // ─── Schemas ─────────────────────────────────────────────────────────────────
@@ -275,69 +272,19 @@ export default async function tournamentRoutes(app: FastifyInstance) {
       onRequest: [app.authenticate],
     },
     async (req, reply) => {
-      const bet = await app.prisma.bet.findUnique({
-        where: { id: req.params.id },
-        select: { id: true, kind: true, status: true, progressivePayoutJson: true, value: true },
-      });
-      if (!bet) return reply.status(404).send({ error: "Torneio não encontrado" } as never);
-      if (bet.kind !== "TOURNAMENT") {
-        return reply.status(400).send({ error: "Bet não é torneio" } as never);
-      }
-      if (bet.status !== "ACTIVE") {
-        return reply.status(400).send({ error: `Torneio já ${bet.status}` } as never);
+      try {
+        await finishTournament(app.prisma, req.params.id, req.user.sub);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Erro ao finalizar";
+        return reply.status(400).send({ error: message } as never);
       }
 
-      const { scores, winners } = await computeTournamentRanking(app.prisma, bet.id);
-
-      // Atualiza ranks e finalScores
-      await app.prisma.$transaction([
-        ...scores.map((s) =>
-          app.prisma.betParticipant.update({
-            where: { id: s.participantId },
-            data: { finalScore: s.score, rank: s.rank },
-          }),
-        ),
-        app.prisma.bet.update({
-          where: { id: bet.id },
-          data: {
-            status: "FINISHED",
-            finishedAt: new Date(),
-            // Compat: winnerSquadId preenchido se top 1 é SQUAD (null se INDIVIDUAL).
-            winnerSquadId: (() => {
-              const topWinnerId = winners[0];
-              if (!topWinnerId) return null;
-              const top = scores.find((s) => s.participantId === topWinnerId);
-              return top?.squadId ?? null;
-            })(),
-          },
-        }),
-      ]);
-
-      // Cofre PAYOUTs progressivos
-      const payoutJson = bet.progressivePayoutJson as Record<string, number> | null;
-      for (const winnerId of winners) {
-        const s = scores.find((x) => x.participantId === winnerId);
-        if (!s) continue;
-        const amount = resolvePayoutForRank(payoutJson, bet.value, s.rank);
-        if (amount > 0) {
-          await app.prisma.cofreEntry.create({
-            data: {
-              betId: bet.id,
-              kind: "PAYOUT",
-              amount,
-              description: `Torneio · ${s.rank}º lugar · ${s.displayName}`,
-              createdById: req.user.sub,
-            },
-          });
-        }
-      }
-
-      // Broadcast
+      // Broadcast pra TV/dashboards refrescarem
       eventBus.emitRankingUpdate();
 
       // Retorna torneio atualizado
       const refreshed = await app.prisma.bet.findUniqueOrThrow({
-        where: { id: bet.id },
+        where: { id: req.params.id },
         include: {
           participants: {
             include: {

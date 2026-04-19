@@ -27,6 +27,7 @@ import prizeRoutes from "./routes/prizes.js";
 import directionRoutes from "./routes/directions.js";
 import announcementRoutes from "./routes/announcements.js";
 import tournamentRoutes from "./routes/tournaments.js";
+import { startTournamentAutoFinishJob } from "./jobs/tournamentAutoFinish.js";
 import openrouterPlugin from "./plugins/openrouter.js";
 
 async function buildApp() {
@@ -94,6 +95,9 @@ async function start() {
     app.log.info(`🚀 Performance Pulse API rodando em http://${env.HOST}:${env.PORT}`);
     app.log.info(`📚 Swagger UI: http://localhost:${env.PORT}/docs`);
     app.log.info(`📄 OpenAPI JSON: http://localhost:${env.PORT}/docs/json`);
+
+    // Background jobs: só sobem depois que o server tá ouvindo, pra não atrasar startup
+    startTournamentAutoFinishJob(app);
   } catch (err) {
     app.log.error(err);
     process.exit(1);
