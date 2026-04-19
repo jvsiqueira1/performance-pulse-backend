@@ -10,6 +10,7 @@
  */
 
 import type { PrismaClient } from "../generated/prisma/client.js";
+import { eventBus } from "./eventBus.js";
 
 export interface TournamentParticipantScore {
   participantId: string;          // BetParticipant.id
@@ -187,10 +188,32 @@ export async function finishTournament(
     }),
   ]);
 
-  // Cofre PAYOUTs
+  // Cofre PAYOUTs + coleta de payload pro evento
   const payoutJson = bet.progressivePayoutJson as Record<string, number> | null;
   const createdById = actorUserId ?? bet.createdById;
   let payoutsCreated = 0;
+  const winnerPayloads: Array<{
+    rank: number;
+    displayName: string;
+    photoUrl: string | null;
+    initials: string | null;
+    payout: number;
+    score: number;
+  }> = [];
+
+  // Busca avatares dos winners pra popular evento SSE (TV mostra foto)
+  const winnerParticipantIds = winners;
+  const participants = winnerParticipantIds.length
+    ? await prisma.betParticipant.findMany({
+        where: { id: { in: winnerParticipantIds } },
+        include: {
+          squad: { select: { name: true, emoji: true } },
+          assessor: { select: { name: true, initials: true, photoUrl: true } },
+        },
+      })
+    : [];
+  const pMap = new Map(participants.map((p) => [p.id, p]));
+
   for (const winnerId of winners) {
     const s = scores.find((x) => x.participantId === winnerId);
     if (!s) continue;
@@ -206,8 +229,31 @@ export async function finishTournament(
         },
       });
       payoutsCreated++;
+
+      const p = pMap.get(winnerId);
+      winnerPayloads.push({
+        rank: s.rank,
+        displayName: s.displayName,
+        photoUrl: p?.assessor?.photoUrl ?? null,
+        initials: p?.assessor?.initials ?? p?.squad?.emoji ?? null,
+        payout: amount,
+        score: s.score,
+      });
     }
   }
+
+  // Fetch roundLabel pro payload do evento (já carregamos no início parcialmente)
+  const betMeta = await prisma.bet.findUnique({
+    where: { id: betId },
+    select: { roundLabel: true },
+  });
+
+  // Emite evento SSE — TV/dashboard ouvem e disparam celebração fullscreen
+  eventBus.emitTournamentFinished({
+    tournamentId: betId,
+    roundLabel: betMeta?.roundLabel ?? "Torneio",
+    winners: winnerPayloads.sort((a, b) => a.rank - b.rank),
+  });
 
   return { winners, payoutsCreated };
 }

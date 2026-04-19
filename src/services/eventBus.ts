@@ -11,6 +11,19 @@
 
 import { EventEmitter } from "node:events";
 
+export interface TournamentFinishedPayload {
+  tournamentId: string;
+  roundLabel: string;
+  winners: Array<{
+    rank: number;
+    displayName: string;
+    photoUrl: string | null;
+    initials: string | null;
+    payout: number;
+    score: number;
+  }>;
+}
+
 class AppEventBus extends EventEmitter {
   constructor() {
     super();
@@ -24,6 +37,20 @@ class AppEventBus extends EventEmitter {
   onRankingUpdate(handler: () => void): () => void {
     this.on("ranking:update", handler);
     return () => this.off("ranking:update", handler);
+  }
+
+  // ─── Tournament finished ──────────────────────────────────────────────────
+  // Emitido quando um torneio encerra (manual ou cron). Payload inclui
+  // winners detalhados pra que a TV possa mostrar celebração fullscreen
+  // sem precisar re-fetch do endpoint.
+
+  emitTournamentFinished(payload: TournamentFinishedPayload) {
+    this.emit("tournament:finished", payload);
+  }
+
+  onTournamentFinished(handler: (p: TournamentFinishedPayload) => void): () => void {
+    this.on("tournament:finished", handler);
+    return () => this.off("tournament:finished", handler);
   }
 }
 

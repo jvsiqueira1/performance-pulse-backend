@@ -43,15 +43,22 @@ export default async function streamRoutes(app: FastifyInstance) {
         reply.raw.write(`: heartbeat\n\n`);
       }, 15_000);
 
-      const unsubscribe = eventBus.onRankingUpdate(() => {
+      const unsubscribeRanking = eventBus.onRankingUpdate(() => {
         reply.raw.write(
           `event: ranking:update\ndata: ${JSON.stringify({ timestamp: new Date().toISOString() })}\n\n`,
         );
       });
 
+      const unsubscribeTournament = eventBus.onTournamentFinished((payload) => {
+        reply.raw.write(
+          `event: tournament:finished\ndata: ${JSON.stringify(payload)}\n\n`,
+        );
+      });
+
       req.raw.on("close", () => {
         clearInterval(heartbeat);
-        unsubscribe();
+        unsubscribeRanking();
+        unsubscribeTournament();
         app.log.info("SSE client disconnected");
       });
     },
