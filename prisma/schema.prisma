@@ -107,6 +107,7 @@ model User {
   cofreEntries        CofreEntry[]
   prizesAwarded       Prize[]
   directionsWritten   DailyDirection[]
+  directionsReviewed  DailyDirection[] @relation("DirectionReviewer")
   announcementsAuthor Announcement[]
 
   @@map("users")
@@ -510,8 +511,12 @@ model SystemConfig {
 
 /// Direcionamento diário editável (foco do dia, orientações do coordenador).
 /// Um registro por data — UPSERT no PUT /api/directions/:date.
+/// Direcionamento (Foco) com período + KPIs alvo + status de cumprimento.
+/// Mantém o nome `DailyDirection` por compat — agora suporta DAILY/WEEKLY/MONTHLY
+/// via campo `period`. Registros existentes ficam DAILY (default).
 model DailyDirection {
   id          String   @id @default(cuid())
+  /// Pra DAILY: a data do dia. Pra WEEKLY: segunda da semana. Pra MONTHLY: dia 1 do mês.
   date        DateTime @unique @db.Date
   text        String
   createdById String
@@ -519,8 +524,35 @@ model DailyDirection {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  // ── Sprint B (Felipe): foco com período + cumprimento ───────────────────
+  period        DirectionPeriod @default(DAILY)
+  /// Default = `date`. Pra WEEKLY/MONTHLY explícito quando precisa range custom.
+  periodStart   DateTime?       @db.Date
+  periodEnd     DateTime?       @db.Date
+  /// Quais KPIs o foco prevê elevar (ex: ["ativacao_conta", "ligacoes"])
+  targetKpiKeys String[]        @default([])
+  status        DirectionStatus @default(PENDING)
+  reviewNote    String?
+  reviewedAt    DateTime?
+  reviewedById  String?
+  reviewedBy    User?           @relation("DirectionReviewer", fields: [reviewedById], references: [id])
+
   @@index([date])
+  @@index([period, date])
   @@map("daily_directions")
+}
+
+enum DirectionPeriod {
+  DAILY
+  WEEKLY
+  MONTHLY
+}
+
+enum DirectionStatus {
+  PENDING
+  ACHIEVED
+  PARTIAL
+  MISSED
 }
 
 /// Avisos manuais que rolam no AnnouncementTicker do dashboard.
