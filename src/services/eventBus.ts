@@ -24,6 +24,16 @@ export interface TournamentFinishedPayload {
   }>;
 }
 
+export interface GoalHitPayload {
+  assessorName: string;
+  assessorInitials: string;
+  photoUrl: string | null;
+  kpiLabel: string;
+  kpiKey: string;
+  percent: number; // >= 100
+}
+
+
 class AppEventBus extends EventEmitter {
   constructor() {
     super();
@@ -52,6 +62,20 @@ class AppEventBus extends EventEmitter {
     this.on("tournament:finished", handler);
     return () => this.off("tournament:finished", handler);
   }
+
+  // ─── Goal hit ─────────────────────────────────────────────────────────────
+  // Emitido quando um assessor cruza 100% da meta de um KPI (de <100 pra >=100).
+  // UI mostra toast 🎯 "João bateu meta de Ativação!"
+
+  emitGoalHit(payload: GoalHitPayload) {
+    this.emit("goal:hit", payload);
+  }
+
+  onGoalHit(handler: (p: GoalHitPayload) => void): () => void {
+    this.on("goal:hit", handler);
+    return () => this.off("goal:hit", handler);
+  }
+
 }
 
 // Singleton — mesmo across todo o app

@@ -55,10 +55,17 @@ export default async function streamRoutes(app: FastifyInstance) {
         );
       });
 
+      const unsubscribeGoalHit = eventBus.onGoalHit((payload) => {
+        reply.raw.write(
+          `event: goal:hit\ndata: ${JSON.stringify(payload)}\n\n`,
+        );
+      });
+
       req.raw.on("close", () => {
         clearInterval(heartbeat);
         unsubscribeRanking();
         unsubscribeTournament();
+        unsubscribeGoalHit();
         app.log.info("SSE client disconnected");
       });
     },

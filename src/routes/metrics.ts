@@ -245,12 +245,40 @@ export default async function metricRoutes(app: FastifyInstance) {
         created = true;
       }
 
-      // Fire badge evaluation + ranking update em background.
-      setImmediate(() => {
-        evaluateBadgesForAssessor(app.prisma, assessorId, targetDate, app.log).catch((err) => {
+      // Detecta cruzamento de 100% pra broadcastar goal:hit (toast 🎯 no frontend)
+      const prevPct = existing?.convertedPercent ?? 0;
+      const newPct = convertedPercent ?? 0;
+      const crossedGoal = prevPct < 100 && newPct >= 100;
+
+      // Fire badge evaluation + ranking update + goal:hit em background.
+      setImmediate(async () => {
+        try {
+          await evaluateBadgesForAssessor(app.prisma, assessorId, targetDate, app.log);
+        } catch (err) {
           app.log.error({ err, assessorId }, "badgeEngine failed");
-        });
+        }
         eventBus.emitRankingUpdate();
+
+        if (crossedGoal) {
+          try {
+            const assessor = await app.prisma.assessor.findUnique({
+              where: { id: assessorId },
+              select: { name: true, initials: true, photoUrl: true },
+            });
+            if (assessor) {
+              eventBus.emitGoalHit({
+                assessorName: assessor.name,
+                assessorInitials: assessor.initials,
+                photoUrl: assessor.photoUrl,
+                kpiLabel: kpi.label,
+                kpiKey: kpi.key,
+                percent: Math.round(newPct),
+              });
+            }
+          } catch (err) {
+            app.log.error({ err, assessorId }, "goal:hit emit failed");
+          }
+        }
       });
 
       reply.status(created ? 201 : 200);
