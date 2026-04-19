@@ -47,7 +47,10 @@ export async function computeBetWinner(
   const scores: BetParticipantScore[] = [];
 
   for (const participant of bet.participants) {
-    const memberIds = (participant.snapshotMembersJson as unknown as string[]) ?? [];
+    // squadId agora é nullable (pra suportar INDIVIDUAL tournament participants).
+    // Pra SQUAD_BET, todos participants têm squadId preenchido — defensivo aqui.
+    if (!participant.squadId) continue;
+    const memberIds = (participant.snapshotMembersJson as unknown as string[] | null) ?? [];
     if (memberIds.length === 0) {
       scores.push({ squadId: participant.squadId, score: 0, memberIds: [] });
       continue;
@@ -87,7 +90,7 @@ export async function computeBetWinner(
       }
     }
 
-    scores.push({ squadId: participant.squadId, score, memberIds });
+    scores.push({ squadId: participant.squadId!, score, memberIds });
   }
 
   // Vencedor = maior score. Se todo mundo tem 0, winnerSquadId = null.

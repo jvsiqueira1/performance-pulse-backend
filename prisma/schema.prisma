@@ -60,6 +60,18 @@ enum BetStatus {
   CANCELED
 }
 
+/// Distingue bet squad-vs-squad (histórico) de torneios com goal+prêmio progressivo.
+enum CompetitionKind {
+  SQUAD_BET
+  TOURNAMENT
+}
+
+/// Escopo de um torneio — individual (cada assessor corre) ou squad (times).
+enum TournamentScope {
+  INDIVIDUAL
+  SQUAD
+}
+
 enum CofreEntryKind {
   DEPOSIT
   PAYOUT
@@ -123,6 +135,7 @@ model Assessor {
   prizes            Prize[]
   squadMemberships  SquadMember[]
   leaderOfSquads    Squad[]          @relation("SquadLeader")
+  betParticipations BetParticipant[] @relation("AssessorBetParticipant")
 
   @@index([active])
   @@map("assessors")
@@ -170,11 +183,11 @@ model ScoringRule {
   kpi             Kpi             @relation(fields: [kpiId], references: [id], onDelete: Cascade)
   ruleType        ScoringRuleType
   // LINEAR fields
-  divisor         Float?          // ex: 1 pra per-unit, 10 pra "10 boletas = 1 pt"
-  pointsPerBucket Float?          // ex: 1 pra "1 ponto a cada divisor"
+  divisor         Float? // ex: 1 pra per-unit, 10 pra "10 boletas = 1 pt"
+  pointsPerBucket Float? // ex: 1 pra "1 ponto a cada divisor"
   // THRESHOLD_PERCENT fields
-  thresholdPct    Float?          // ex: 70 = ≥70% da meta
-  thresholdPoints Float?          // ex: 5 pts quando atinge threshold
+  thresholdPct    Float? // ex: 70 = ≥70% da meta
+  thresholdPoints Float? // ex: 5 pts quando atinge threshold
   active          Boolean         @default(true)
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt
@@ -189,17 +202,17 @@ enum ScoringRuleType {
 
 /// Meta historizável por KPI — suporta aplicação retroativa.
 model Goal {
-  id                    String     @id @default(cuid())
-  kpiId                 String
-  kpi                   Kpi        @relation(fields: [kpiId], references: [id], onDelete: Cascade)
-  value                 Float
-  period                GoalPeriod
-  validFrom             DateTime
-  validTo               DateTime?
-  appliesRetroactively  Boolean    @default(false)
-  createdById           String
-  createdBy             User       @relation(fields: [createdById], references: [id])
-  createdAt             DateTime   @default(now())
+  id                   String     @id @default(cuid())
+  kpiId                String
+  kpi                  Kpi        @relation(fields: [kpiId], references: [id], onDelete: Cascade)
+  value                Float
+  period               GoalPeriod
+  validFrom            DateTime
+  validTo              DateTime?
+  appliesRetroactively Boolean    @default(false)
+  createdById          String
+  createdBy            User       @relation(fields: [createdById], references: [id])
+  createdAt            DateTime   @default(now())
 
   @@index([kpiId, validFrom])
   @@index([kpiId, validTo])
@@ -208,18 +221,18 @@ model Goal {
 
 /// Item do cronograma semanal (ex: "Geração Lista Prospecção", segunda manhã).
 model Activity {
-  id                  String      @id @default(cuid())
-  name                String
-  description         String?
-  dayOfWeek           Int         // 1=seg .. 5=sex
-  startTime           String      // "HH:mm"
-  endTime             String      // "HH:mm"
-  cadenceType         CadenceType @default(WEEKLY)
-  biweeklyAnchorDate  DateTime?   @db.Date
-  sortOrder           Int         @default(0)
-  active              Boolean     @default(true)
-  createdAt           DateTime    @default(now())
-  updatedAt           DateTime    @updatedAt
+  id                 String      @id @default(cuid())
+  name               String
+  description        String?
+  dayOfWeek          Int // 1=seg .. 5=sex
+  startTime          String // "HH:mm"
+  endTime            String // "HH:mm"
+  cadenceType        CadenceType @default(WEEKLY)
+  biweeklyAnchorDate DateTime?   @db.Date
+  sortOrder          Int         @default(0)
+  active             Boolean     @default(true)
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
 
   kpis          ActivityKpi[]
   metricEntries MetricEntry[]
@@ -231,11 +244,11 @@ model Activity {
 
 /// Join Activity↔Kpi com target override opcional.
 model ActivityKpi {
-  id             String    @id @default(cuid())
+  id             String   @id @default(cuid())
   activityId     String
-  activity       Activity  @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  activity       Activity @relation(fields: [activityId], references: [id], onDelete: Cascade)
   kpiId          String
-  kpi            Kpi       @relation(fields: [kpiId], references: [id], onDelete: Restrict)
+  kpi            Kpi      @relation(fields: [kpiId], references: [id], onDelete: Restrict)
   targetOverride Float?
 
   @@unique([activityId, kpiId])
@@ -274,18 +287,18 @@ model MetricEntry {
 
 /// Captura outcome de reuniões (marcou vs fechou).
 model MeetingOutcome {
-  id                      String               @id @default(cuid())
-  assessorId              String
-  assessor                Assessor             @relation(fields: [assessorId], references: [id], onDelete: Cascade)
-  scheduledDate           DateTime
-  scheduledMetricEntryId  String?              @unique
-  scheduledMetricEntry    MetricEntry?         @relation(fields: [scheduledMetricEntryId], references: [id], onDelete: SetNull)
-  outcome                 MeetingOutcomeStatus @default(SCHEDULED)
-  closedAt                DateTime?
-  ticketValue             Float?
-  notes                   String?
-  createdAt               DateTime             @default(now())
-  updatedAt               DateTime             @updatedAt
+  id                     String               @id @default(cuid())
+  assessorId             String
+  assessor               Assessor             @relation(fields: [assessorId], references: [id], onDelete: Cascade)
+  scheduledDate          DateTime
+  scheduledMetricEntryId String?              @unique
+  scheduledMetricEntry   MetricEntry?         @relation(fields: [scheduledMetricEntryId], references: [id], onDelete: SetNull)
+  outcome                MeetingOutcomeStatus @default(SCHEDULED)
+  closedAt               DateTime?
+  ticketValue            Float?
+  notes                  String?
+  createdAt              DateTime             @default(now())
+  updatedAt              DateTime             @updatedAt
 
   @@index([assessorId, scheduledDate])
   @@index([outcome])
@@ -328,42 +341,68 @@ model SquadMember {
   @@map("squad_members")
 }
 
-/// Squad bet — critério de vitória configurável via JSON.
+/// Squad bet OU torneio — campo `kind` distingue.
+/// SQUAD_BET: aposta squad-vs-squad (winner-take-all).
+/// TOURNAMENT: corrida com meta + prêmio progressivo (top N).
 model Bet {
-  id                  String    @id @default(cuid())
-  roundLabel          String
-  type                BetType
-  value               Float
-  startDate           DateTime  @db.Date
-  endDate             DateTime  @db.Date
-  status              BetStatus @default(ACTIVE)
-  winnerSquadId       String?
-  winnerSquad         Squad?    @relation("BetWinner", fields: [winnerSquadId], references: [id])
-  winnerCriteriaJson  Json
-  createdById         String
-  createdBy           User      @relation(fields: [createdById], references: [id])
-  createdAt           DateTime  @default(now())
-  finishedAt          DateTime?
+  id                 String    @id @default(cuid())
+  roundLabel         String
+  type               BetType
+  value              Float
+  startDate          DateTime  @db.Date
+  endDate            DateTime  @db.Date
+  status             BetStatus @default(ACTIVE)
+  winnerSquadId      String?
+  winnerSquad        Squad?    @relation("BetWinner", fields: [winnerSquadId], references: [id])
+  winnerCriteriaJson Json
+  createdById        String
+  createdBy          User      @relation(fields: [createdById], references: [id])
+  createdAt          DateTime  @default(now())
+  finishedAt         DateTime?
+
+  // ── Tournament extensions (kind=TOURNAMENT) ─────────────────────────────
+  /// Default SQUAD_BET mantém compat — bets existentes não mudam de comportamento.
+  kind                  CompetitionKind  @default(SQUAD_BET)
+  /// Escopo do torneio — só preenchido se kind=TOURNAMENT.
+  tournamentScope       TournamentScope?
+  /// Top N ganhadores (default 1). Usado pra payout progressivo.
+  maxWinners            Int?
+  /// Payout progressivo: {"1": 300, "2": 150, "3": 100}. Se null, `value` vai pro 1º.
+  progressivePayoutJson Json?
+  /// KPI da corrida (ex: "ativacao_conta"). Torneio threshold-race usa + goalTargetValue.
+  goalKpiKey            String?
+  /// Meta numérica do torneio (ex: primeiro a 50). Opcional.
+  goalTargetValue       Float?
 
   participants BetParticipant[]
   cofreEntries CofreEntry[]
 
   @@index([status])
   @@index([endDate])
+  @@index([kind])
   @@map("bets")
 }
 
-/// Participante de uma bet (snapshot de quem estava no squad quando começou).
+/// Participante de uma competição.
+/// SQUAD_BET / TOURNAMENT scope=SQUAD: squadId preenchido, assessorId null.
+/// TOURNAMENT scope=INDIVIDUAL: assessorId preenchido, squadId null.
+/// Exatamente um dos dois deve estar preenchido (validado no serviço).
 model BetParticipant {
-  id                  String @id @default(cuid())
+  id                  String    @id @default(cuid())
   betId               String
-  bet                 Bet    @relation(fields: [betId], references: [id], onDelete: Cascade)
-  squadId             String
-  squad               Squad  @relation(fields: [squadId], references: [id])
-  snapshotMembersJson Json
+  bet                 Bet       @relation(fields: [betId], references: [id], onDelete: Cascade)
+  squadId             String?
+  squad               Squad?    @relation(fields: [squadId], references: [id])
+  assessorId          String?
+  assessor            Assessor? @relation("AssessorBetParticipant", fields: [assessorId], references: [id])
+  /// Snapshot de membros no momento em que o squad entrou (só pra SQUAD scope).
+  snapshotMembersJson Json?
   finalScore          Float?
+  /// Rank final após finish (1=vencedor). Null enquanto bet/torneio ACTIVE.
+  rank                Int?
 
   @@unique([betId, squadId])
+  @@unique([betId, assessorId])
   @@map("bet_participants")
 }
 
@@ -449,7 +488,7 @@ model Prize {
   assessor    Assessor @relation(fields: [assessorId], references: [id], onDelete: Cascade)
   title       String
   description String?
-  period      String   // "2026-W15", "2026-04", etc
+  period      String // "2026-W15", "2026-04", etc
   awardedById String
   awardedBy   User     @relation(fields: [awardedById], references: [id])
   createdAt   DateTime @default(now())

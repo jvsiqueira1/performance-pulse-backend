@@ -58,6 +58,9 @@ const listQuerySchema = z.object({
 
 // ─── Serializer ──────────────────────────────────────────────────────────────
 
+// Row type atualizado: squadId e squad agora podem ser null (tournaments INDIVIDUAL
+// usam assessorId). Pra /api/bets só retornamos bets SQUAD_BET (filtro abaixo),
+// mas o tipo reflete o schema.
 type BetRow = {
   id: string;
   roundLabel: string;
@@ -73,9 +76,9 @@ type BetRow = {
   finishedAt: Date | null;
   winnerSquad: { id: string; name: string; emoji: string } | null;
   participants: Array<{
-    squadId: string;
+    squadId: string | null;
     finalScore: number | null;
-    squad: { name: string; emoji: string };
+    squad: { name: string; emoji: string } | null;
   }>;
 };
 
@@ -94,12 +97,16 @@ function serializeBet(row: BetRow) {
     createdById: row.createdById,
     createdAt: row.createdAt.toISOString(),
     finishedAt: row.finishedAt ? row.finishedAt.toISOString() : null,
-    participants: row.participants.map((p) => ({
-      squadId: p.squadId,
-      finalScore: p.finalScore,
-      squadName: p.squad.name,
-      squadEmoji: p.squad.emoji,
-    })),
+    // Filtra participants sem squad (não deveria ocorrer em SQUAD_BET, mas é
+    // defensivo caso um tournament INDIVIDUAL apareça aqui por filtro frouxo).
+    participants: row.participants
+      .filter((p) => p.squadId !== null && p.squad !== null)
+      .map((p) => ({
+        squadId: p.squadId!,
+        finalScore: p.finalScore,
+        squadName: p.squad!.name,
+        squadEmoji: p.squad!.emoji,
+      })),
   };
 }
 
@@ -128,8 +135,9 @@ export default async function betRoutes(app: FastifyInstance) {
     },
     async (req) => {
       const { status } = req.query;
+      // Filtra só SQUAD_BET — tournaments vêm por /api/tournaments.
       const rows = await app.prisma.bet.findMany({
-        where: status ? { status } : undefined,
+        where: { kind: "SQUAD_BET", ...(status ? { status } : {}) },
         orderBy: [{ status: "asc" }, { createdAt: "desc" }],
         include: betInclude,
       });
