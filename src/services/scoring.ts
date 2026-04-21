@@ -102,17 +102,12 @@ export function computeMetricFields(
       convertedPercent = rawValue;
       break;
     case "QUANTITY_OVER_BASE":
-      // Primeiro tenta base/raw (caso admin tenha preenchido lista).
-      // Fallback: se baseValue faltando/zero, usa target como base implícita
-      // (comportamento ABSOLUTE). Antes retornava 0, o que fazia cadência
-      // nunca atingir o threshold do scoring rule (bug reportado).
-      if (baseValue && baseValue > 0) {
-        convertedPercent = (rawValue / baseValue) * 100;
-      } else if (target > 0) {
-        convertedPercent = (rawValue / target) * 100;
-      } else {
-        convertedPercent = 0;
-      }
+      // base = tamanho da lista do assessor naquele dia (campo "Lista" no
+      // RegistrationPanel). Ex: Arthur tem 30 leads, cadenciou 21 → 70%.
+      // Alinhamento com Felipe (22/04): SEM fallback pra target — se a Lista
+      // não foi preenchida, convertedPercent=0 (não pontua). Responsabilidade
+      // do admin é preencher a base ao lançar.
+      convertedPercent = baseValue && baseValue > 0 ? (rawValue / baseValue) * 100 : 0;
       break;
   }
 
