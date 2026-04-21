@@ -114,21 +114,24 @@ const directionInclude = {
 export default async function directionRoutes(app: FastifyInstance) {
   const typed = app.withTypeProvider<ZodTypeProvider>();
 
-  // GET — busca direcionamento de uma data específica
+  // GET — busca direcionamento de uma data específica.
+  // PUBLIC: consumido pela rota /tv (sem login) via AnnouncementTicker +
+  // useWeekDirections. Direcionamento é basicamente um aviso de foco do
+  // dia — mesma natureza de announcements, que já é público.
   typed.get(
     "/api/directions/:date",
     {
       schema: {
-        description: "Busca o direcionamento pra uma data específica.",
+        description:
+          "Busca o direcionamento pra uma data específica. PUBLIC — consumido pela /tv.",
         tags: ["directions"],
-        security: [{ bearerAuth: [] }],
         params: dateParamsSchema,
         response: {
           200: directionResponseSchema,
           204: z.null(),
         },
       },
-      onRequest: [app.authenticate],
+      // Sem auth: usado pela TV pública.
     },
     async (req, reply) => {
       const date = parseDateOnly(req.params.date);
