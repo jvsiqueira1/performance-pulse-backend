@@ -56,6 +56,17 @@ export interface OverviewPerformerEntry {
   weeklyGoalPercent: number;
 }
 
+/**
+ * Breakdown por assessor do período — kpiTotals agregados por kpiKey.
+ * Adicionado pra resolver inconsistência nos cards do KpiAnalytics: antes
+ * os cards usavam `a.kpis` do useAssessors (sempre weekly corrente) enquanto
+ * % e points vinham do range selecionado → mismatch.
+ */
+export interface OverviewByAssessorEntry {
+  assessorId: string;
+  kpis: Record<string, number>;
+}
+
 export interface OverviewReportResponse {
   from: string;
   to: string;
@@ -64,6 +75,7 @@ export interface OverviewReportResponse {
   topPerformers: OverviewPerformerEntry[];
   bottomPerformers: OverviewPerformerEntry[];
   allPerformers: OverviewPerformerEntry[];
+  byAssessor: OverviewByAssessorEntry[];
 }
 
 export interface AssessorKpiHistory {
@@ -376,6 +388,18 @@ export async function buildOverview(
   const sortedDesc = [...performers].sort((a, b) => b.points - a.points);
   const sortedAsc = [...performers].sort((a, b) => a.points - b.points);
 
+  // Breakdown por assessor — pra cada um, agrupa rawValue somado por kpiKey.
+  // Usado pelos cards do KpiAnalytics pra ficar consistente com % e points
+  // (todos agora refletem o range selecionado).
+  const byAssessor: OverviewByAssessorEntry[] = allAssessors.map((a) => {
+    const kpis: Record<string, number> = {};
+    for (const e of a.metricEntries) {
+      const key = e.kpi.key;
+      kpis[key] = (kpis[key] ?? 0) + e.rawValue;
+    }
+    return { assessorId: a.id, kpis };
+  });
+
   const totalMetricEntries = allAssessors.reduce((acc, a) => acc + a.metricEntries.length, 0);
 
   return {
@@ -386,6 +410,7 @@ export async function buildOverview(
     topPerformers: sortedDesc.slice(0, 3),
     bottomPerformers: sortedAsc.slice(0, 3),
     allPerformers: sortedDesc,
+    byAssessor,
   };
 }
 

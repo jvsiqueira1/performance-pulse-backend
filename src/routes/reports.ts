@@ -77,6 +77,11 @@ const overviewPerformerSchema = z.object({
   weeklyGoalPercent: z.number(),
 });
 
+const overviewByAssessorSchema = z.object({
+  assessorId: z.string(),
+  kpis: z.record(z.string(), z.number()),
+});
+
 const overviewResponseSchema = z.object({
   from: z.string(),
   to: z.string(),
@@ -85,6 +90,7 @@ const overviewResponseSchema = z.object({
   topPerformers: z.array(overviewPerformerSchema),
   bottomPerformers: z.array(overviewPerformerSchema),
   allPerformers: z.array(overviewPerformerSchema),
+  byAssessor: z.array(overviewByAssessorSchema),
 });
 
 // ─── Assessor report schema ──────────────────────────────────────────────────
