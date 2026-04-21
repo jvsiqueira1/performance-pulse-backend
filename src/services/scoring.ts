@@ -81,8 +81,8 @@ function applyScoringRule(
  * - Antes de 16/04: pointsAwarded = round(min(150, convertedPercent)) (proporcional)
  * - 16/04: tabela hardcoded por kpi.key em scoring.ts
  * - 17/04: tabela movida pro banco (model ScoringRule), editável via UI
- *
- * Sem rule → fallback proporcional cap 150 (compat).
+ * - 22/04: sem rule → 0 pts (era fallback proporcional que mascarava KPIs
+ *   mal configurados; agora sinaliza explicitamente que falta rule).
  */
 export function computeMetricFields(
   kpi: KpiConfig,
@@ -111,9 +111,11 @@ export function computeMetricFields(
       break;
   }
 
+  // Sem rule = 0 pts. Força o admin a configurar a regra explicitamente —
+  // evita pontos fantasma do fallback proporcional que enganavam o ranking.
   const pointsAwarded = scoringRule
     ? Math.max(0, applyScoringRule(scoringRule, rawValue, convertedPercent))
-    : Math.round(Math.min(Math.max(convertedPercent, 0), 150));
+    : 0;
 
   return { convertedPercent, pointsAwarded };
 }

@@ -127,7 +127,9 @@ async function main() {
 
       const savedPts = e.pointsAwarded ?? 0;
       const match = Math.abs(savedPts - pointsAwarded) < 0.01;
-      const marker = match ? "✓" : "✗";
+      // Sem rule: valor "esperado" é sempre 0 (após 22/04). Se salvo > 0,
+      // foi calculado sob regras antigas — sinalizar como LEGACY, não BUG.
+      const marker = !rule ? (savedPts > 0 ? "⚠" : "✓") : match ? "✓" : "✗";
 
       const rawInfo = kpi.inputMode === "QUANTITY_OVER_BASE"
         ? `raw=${e.rawValue}/base=${e.baseValue ?? "NULL"}`
@@ -148,7 +150,9 @@ async function main() {
       );
 
       totalChecked++;
-      if (!match) {
+      // Divergência real só quando HÁ rule e não bate. Sem rule, saved>0 é
+      // valor legado (rules antigas) — informativo, não erro.
+      if (rule && !match) {
         totalMismatches++;
         mismatches.push(
           `  ${kpi.label} / ${e.assessor.name} / ${dateStr}: salvo=${savedPts}, esperado=${pointsAwarded}`
@@ -167,6 +171,14 @@ async function main() {
     for (const m of mismatches) console.log(m);
   } else {
     console.log("\n✅ Tudo batendo com as rules atuais.");
+  }
+
+  // Alerta se muitos KPIs sem rule
+  const kpisSemRule = kpis.filter((k) => !k.scoringRule[0]).length;
+  if (kpisSemRule > 0) {
+    console.log(`\n⚠️  ${kpisSemRule} KPI(s) SEM scoring rule ativa — ninguém pontua neles.`);
+    console.log("   Rode: npx tsx scripts/check-scoring-rules.ts  (diagnóstico)");
+    console.log("   Ou:   npx tsx scripts/upsert-kpis.ts          (recria rules default)");
   }
 
   await prisma.$disconnect();
