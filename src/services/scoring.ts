@@ -102,7 +102,17 @@ export function computeMetricFields(
       convertedPercent = rawValue;
       break;
     case "QUANTITY_OVER_BASE":
-      convertedPercent = baseValue && baseValue > 0 ? (rawValue / baseValue) * 100 : 0;
+      // Primeiro tenta base/raw (caso admin tenha preenchido lista).
+      // Fallback: se baseValue faltando/zero, usa target como base implícita
+      // (comportamento ABSOLUTE). Antes retornava 0, o que fazia cadência
+      // nunca atingir o threshold do scoring rule (bug reportado).
+      if (baseValue && baseValue > 0) {
+        convertedPercent = (rawValue / baseValue) * 100;
+      } else if (target > 0) {
+        convertedPercent = (rawValue / target) * 100;
+      } else {
+        convertedPercent = 0;
+      }
       break;
   }
 
