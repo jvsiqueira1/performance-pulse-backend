@@ -20,49 +20,30 @@ const prisma = new PrismaClient({ adapter });
 async function main() {
   console.log("\n━━━ DIAGNÓSTICO DE SCORING RULES ━━━\n");
 
+  // scoringRule é 1:1 (optional), não array. Então busco separado.
   const kpis = await prisma.kpi.findMany({
     where: { active: true, isDerived: false },
     orderBy: { sortOrder: "asc" },
-    include: {
-      scoringRule: true, // TODAS, inclusive inativas
-    },
+    include: { scoringRule: true },
   });
 
   console.log(`KPIs ativos: ${kpis.length}\n`);
-  console.log("KPI                       │ Rules (total) │ Rule ativa?          │ Detalhes");
+  console.log("KPI                       │ Rule no banco? │ Ativa?       │ Detalhes");
   console.log("─".repeat(115));
 
   for (const kpi of kpis) {
-    const rules = kpi.scoringRule;
-    const active = rules.find((r) => r.active);
-    const inactive = rules.filter((r) => !r.active);
-
-    const activeStr = active
-      ? `✓ ACTIVE (id ${active.id.slice(0, 8)})`
-      : "✗ NENHUMA ATIVA";
-
-    const detail = active
-      ? active.ruleType === "LINEAR"
-        ? `LINEAR: /${active.divisor} × ${active.pointsPerBucket} pts`
-        : `THRESHOLD: ≥${active.thresholdPct}% → ${active.thresholdPoints} pts`
-      : inactive.length > 0
-        ? `${inactive.length} rule(s) INATIVA(s) no banco`
-        : "sem rules no banco";
+    const rule = kpi.scoringRule; // ScoringRule | null
+    const existsStr = rule ? "✓ existe" : "✗ NÃO EXISTE";
+    const activeStr = rule ? (rule.active ? "✓ ATIVA" : "✗ INATIVA") : "—";
+    const detail = rule
+      ? rule.ruleType === "LINEAR"
+        ? `LINEAR: floor(raw/${rule.divisor}) × ${rule.pointsPerBucket} pts`
+        : `THRESHOLD: ≥${rule.thresholdPct}% → ${rule.thresholdPoints} pts`
+      : "sem rule (ninguém pontua neste KPI)";
 
     console.log(
-      `${kpi.label.padEnd(25)} │ ${String(rules.length).padEnd(13)} │ ${activeStr.padEnd(20)} │ ${detail}`
+      `${kpi.label.padEnd(25)} │ ${existsStr.padEnd(14)} │ ${activeStr.padEnd(12)} │ ${detail}`
     );
-
-    // Se há inativas, mostra detalhes
-    if (!active && inactive.length > 0) {
-      for (const r of inactive) {
-        const d =
-          r.ruleType === "LINEAR"
-            ? `LINEAR: /${r.divisor} × ${r.pointsPerBucket}`
-            : `THRESHOLD: ≥${r.thresholdPct}% → ${r.thresholdPoints}`;
-        console.log(`${" ".repeat(25)} │ ${" ".repeat(13)} │ ${" ".repeat(20)} │   └ inativa: ${d}`);
-      }
-    }
   }
 
   // ─── Contagem total ─────────────────────────────────────────────────────
