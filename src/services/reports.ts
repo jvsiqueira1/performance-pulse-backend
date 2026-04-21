@@ -195,13 +195,17 @@ function computeAggregatedTarget(params: {
     return goalValue;
   }
   // ABSOLUTE: escala por período × tamanho do time
+  // Arredonda pra períodos INTEIROS. Antes usava fração (days/7) → gerava
+  // targets tipo 42.857 em range mensal com meta WEEKLY (bug #9, 22/04).
+  // Agora: 30 dias ÷ 7 arredondado = 4 semanas × meta. Casa com a intuição
+  // "meta semanal × ~4 semanas no mês".
   let periodMultiplier: number;
   switch (goalPeriod) {
     case "WEEKLY":
-      periodMultiplier = Math.max(1, days / 7);
+      periodMultiplier = Math.max(1, Math.round(days / 7));
       break;
     case "MONTHLY":
-      periodMultiplier = Math.max(1, days / 30);
+      periodMultiplier = Math.max(1, Math.round(days / 30));
       break;
     case "DAILY":
     default:
