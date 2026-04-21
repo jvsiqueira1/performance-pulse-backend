@@ -45,11 +45,13 @@ async function main() {
   console.log("║   VALIDADOR DE PONTUAÇÃO — Performance Pulse                   ║");
   console.log("╚════════════════════════════════════════════════════════════════╝\n");
 
+  // scoringRule é 1:1 — não aceita `where` no include. Busca tudo, filtra
+  // active em memória.
   const kpis = await prisma.kpi.findMany({
     where: { active: true, isDerived: false },
     orderBy: { sortOrder: "asc" },
     include: {
-      scoringRule: { where: { active: true } },
+      scoringRule: true,
       goals: {
         where: { validTo: null },
         orderBy: { validFrom: "desc" },
@@ -65,7 +67,7 @@ async function main() {
   );
   console.log("─".repeat(100));
   for (const kpi of kpis) {
-    const rule = kpi.scoringRule[0] ?? null;
+    const rule = kpi.scoringRule && kpi.scoringRule.active ? kpi.scoringRule : null;
     const goal = kpi.goals[0];
     const metaStr = goal
       ? `${goal.value} (${goal.period})`
@@ -83,7 +85,7 @@ async function main() {
   const mismatches: string[] = [];
 
   for (const kpi of kpis) {
-    const rule = kpi.scoringRule[0] ?? null;
+    const rule = kpi.scoringRule && kpi.scoringRule.active ? kpi.scoringRule : null;
     const entries = await prisma.metricEntry.findMany({
       where: { kpiId: kpi.id },
       orderBy: { date: "desc" },
@@ -174,7 +176,7 @@ async function main() {
   }
 
   // Alerta se muitos KPIs sem rule
-  const kpisSemRule = kpis.filter((k) => !k.scoringRule[0]).length;
+  const kpisSemRule = kpis.filter((k) => !k.scoringRule || !k.scoringRule.active).length;
   if (kpisSemRule > 0) {
     console.log(`\n⚠️  ${kpisSemRule} KPI(s) SEM scoring rule ativa — ninguém pontua neles.`);
     console.log("   Rode: npx tsx scripts/check-scoring-rules.ts  (diagnóstico)");
