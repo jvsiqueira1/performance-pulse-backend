@@ -164,7 +164,13 @@ function isBusinessDay(d: Date): boolean {
   return dow >= 1 && dow <= 5;
 }
 
-const PENALTY_PER_IDLE_DAY = 15;
+/**
+ * Pontos deduzidos por dia útil sem atividade. Reduzido de 15 → 5 em
+ * 21/04/2026: valor antigo zerava todos os assessores em ranges mensais
+ * (10 dias × 15 = 150 pts, maior que rawPts da maioria). Com 5, penalty
+ * fica proporcional e o ranking mostra quem pontuou mais líquido.
+ */
+const PENALTY_PER_IDLE_DAY = 5;
 
 /**
  * Agrega entries de um assessor em um período pra calcular points/streak/etc.
@@ -215,20 +221,26 @@ export function computeAssessorRollup(
   }
 
   // Penalidade: dias úteis no período sem nenhuma entry (e sem notes/justificativa)
-  // contam como -15 pts cada. Entries com notes (justificativa) isentam o dia.
+  // contam como -PENALTY_PER_IDLE_DAY pts cada. Entries com notes isentam o dia.
   const activeDaysList = Array.from(dayStrs).sort();
   const justifiedDays = new Set(
     entries.filter((e) => e.notes && e.notes.trim().length > 0).map((e) => formatDateOnly(e.date)),
   );
   let penaltyDays = 0;
   if (activeDaysList.length > 0 || referenceDate) {
-    // Range: primeiro dia ativo (ou referenceDate) até referenceDate
+    // Range: primeiro dia ativo (ou referenceDate) até referenceDate.
+    // ATENÇÃO: cap em "hoje UTC" pra nunca contar dias FUTUROS como inativos.
+    // Antes (bug reportado 21/04/2026) ranges mensais/semestrais contavam
+    // todo o futuro até fim do mês/semestre como penalty — zerava todo mundo.
+    const todayUtc = new Date();
+    todayUtc.setUTCHours(0, 0, 0, 0);
     const rangeStart = activeDaysList.length > 0
       ? new Date(activeDaysList[0])
       : referenceDate;
-    const rangeEnd = new Date(referenceDate);
+    const rangeEndCandidate = new Date(referenceDate);
     rangeStart.setUTCHours(0, 0, 0, 0);
-    rangeEnd.setUTCHours(0, 0, 0, 0);
+    rangeEndCandidate.setUTCHours(0, 0, 0, 0);
+    const rangeEnd = rangeEndCandidate > todayUtc ? todayUtc : rangeEndCandidate;
 
     const cursor = new Date(rangeStart);
     while (cursor <= rangeEnd) {
