@@ -81,11 +81,11 @@ class AppEventBus extends EventEmitter {
   // (não só quem registrou). Usado pro som de ativação — assim Felipe vê/ouve
   // independente de espelhamento de tela ou onde registrou.
 
-  emitSoundPlay(payload: { kpiKey: string }) {
+  emitSoundPlay(payload: { kpiKey: string; soundUrl: string }) {
     this.emit("sound:play", payload);
   }
 
-  onSoundPlay(handler: (p: { kpiKey: string }) => void): () => void {
+  onSoundPlay(handler: (p: { kpiKey: string; soundUrl: string }) => void): () => void {
     this.on("sound:play", handler);
     return () => this.off("sound:play", handler);
   }

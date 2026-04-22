@@ -162,6 +162,7 @@ model Kpi {
   metricEntries MetricEntry[]
   activityKpis  ActivityKpi[]
   scoringRule   ScoringRule?
+  sound         KpiSound?
 
   @@index([active, sortOrder])
   @@map("kpis")
@@ -199,6 +200,29 @@ model ScoringRule {
 enum ScoringRuleType {
   LINEAR
   THRESHOLD_PERCENT
+}
+
+/// Som customizado por KPI. Admin sobe MP3/WAV via /api/kpis/:id/sound,
+/// arquivo vai pro R2, URL pública fica em soundUrl. Introduzido 22/04/2026
+/// pra resolver double-play (antes tinha synth frontend + MP3 hardcoded
+/// paralelos) e permitir gestão via UI sem deploy.
+///
+/// Flags:
+/// - enabled: se false, não toca mesmo tendo arquivo (mute temporário)
+/// - broadcast: se true, emite sound:play via SSE pra TODOS clientes
+///   conectados (TV + dashboards abertos). Se false, ninguém toca — o
+///   frontend atual não toca mais KPI sounds locais, tudo via broadcast.
+model KpiSound {
+  id         String   @id @default(cuid())
+  kpiId      String   @unique
+  kpi        Kpi      @relation(fields: [kpiId], references: [id], onDelete: Cascade)
+  soundUrl   String // URL pública R2 (cache-busted). Remover = deletar registro.
+  enabled    Boolean  @default(true)
+  broadcast  Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@map("kpi_sounds")
 }
 
 /// Meta historizável por KPI — suporta aplicação retroativa.

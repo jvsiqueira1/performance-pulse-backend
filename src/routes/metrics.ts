@@ -128,10 +128,10 @@ export default async function metricRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: "Informe kpiKey ou kpiId" } as never);
       }
 
-      // Resolver KPI + scoring rule
+      // Resolver KPI + scoring rule + som (pra decidir broadcast)
       const kpi = await app.prisma.kpi.findUnique({
         where: kpiId ? { id: kpiId } : { key: kpiKey! },
-        include: { scoringRule: true },
+        include: { scoringRule: true, sound: true },
       });
       if (!kpi) return reply.status(404).send({ error: "KPI não encontrado" } as never);
 
@@ -264,11 +264,17 @@ export default async function metricRoutes(app: FastifyInstance) {
       const newPct = convertedPercent ?? 0;
       const crossedGoal = prevPct < 100 && newPct >= 100;
 
-      // Detecta ativação NOVA (rawValue cresceu em ativacao_conta) pra
-      // broadcastar sound:play em TODOS clientes (TV + laptop do Felipe +
-      // qualquer aba aberta). Assim som toca independente de espelhamento.
+      // Broadcast de som via SSE: só emite se o KPI tem KpiSound com
+      // enabled=true E broadcast=true, E rawValue cresceu (evento novo,
+      // não edição de valor anterior). Admin controla via UI em
+      // Metas & KPIs → Som do KPI. Substituiu check hardcoded por
+      // ativacao_conta em 22/04/2026.
       const prevRaw = existing?.rawValue ?? 0;
-      const isNewActivation = kpi.key === "ativacao_conta" && rawValue > prevRaw;
+      const shouldBroadcastSound =
+        kpi.sound?.enabled === true &&
+        kpi.sound.broadcast === true &&
+        rawValue > prevRaw;
+      const soundUrl = kpi.sound?.soundUrl ?? null;
 
       // Fire badge evaluation + ranking update + goal:hit em background.
       setImmediate(async () => {
@@ -279,8 +285,8 @@ export default async function metricRoutes(app: FastifyInstance) {
         }
         eventBus.emitRankingUpdate();
 
-        if (isNewActivation) {
-          eventBus.emitSoundPlay({ kpiKey: kpi.key });
+        if (shouldBroadcastSound && soundUrl) {
+          eventBus.emitSoundPlay({ kpiKey: kpi.key, soundUrl });
         }
 
         if (crossedGoal) {

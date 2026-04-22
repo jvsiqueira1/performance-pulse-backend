@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
+import { getSoundStorage } from "../services/soundStorage.js";
 
 const kpiInputModeSchema = z.enum(["ABSOLUTE", "PERCENT", "QUANTITY_OVER_BASE"]);
 const goalPeriodSchema = z.enum(["DAILY", "WEEKLY", "MONTHLY"]);
@@ -27,6 +28,19 @@ const scoringRuleSchema = z
   })
   .nullable();
 
+const soundSchema = z
+  .object({
+    url: z.string(),
+    enabled: z.boolean(),
+    broadcast: z.boolean(),
+  })
+  .nullable();
+
+const updateSoundBodySchema = z.object({
+  enabled: z.boolean().optional(),
+  broadcast: z.boolean().optional(),
+});
+
 const kpiResponseSchema = z.object({
   id: z.string(),
   key: z.string(),
@@ -41,6 +55,7 @@ const kpiResponseSchema = z.object({
   active: z.boolean(),
   activeGoal: activeGoalSchema,
   scoringRule: scoringRuleSchema,
+  sound: soundSchema,
 });
 
 const upsertScoringRuleBodySchema = z
@@ -141,6 +156,11 @@ type KpiRow = {
     thresholdPoints: number | null;
     active: boolean;
   } | null;
+  sound: {
+    soundUrl: string;
+    enabled: boolean;
+    broadcast: boolean;
+  } | null;
 };
 
 function serializeKpi(row: KpiRow) {
@@ -176,6 +196,13 @@ function serializeKpi(row: KpiRow) {
           active: row.scoringRule.active,
         }
       : null,
+    sound: row.sound
+      ? {
+          url: row.sound.soundUrl,
+          enabled: row.sound.enabled,
+          broadcast: row.sound.broadcast,
+        }
+      : null,
   };
 }
 
@@ -186,6 +213,7 @@ const KPI_INCLUDE = {
     take: 1,
   },
   scoringRule: true,
+  sound: true,
 } as const;
 
 export default async function kpiRoutes(app: FastifyInstance) {
@@ -348,6 +376,150 @@ export default async function kpiRoutes(app: FastifyInstance) {
         create: { kpiId: kpi.id, ...data },
         update: data,
       });
+
+      const fresh = await app.prisma.kpi.findUniqueOrThrow({
+        where: { id: req.params.id },
+        include: KPI_INCLUDE,
+      });
+      return serializeKpi(fresh);
+    },
+  );
+
+  // ─── SOUND: POST (upload) ───────────────────────────────────────────────
+  // Upload multipart de arquivo de áudio. Espelha `POST /assessors/:id/photo`
+  // em `routes/assessors.ts`. Max 2MB, aceita audio/mpeg|wav|ogg|webm.
+  typed.post(
+    "/api/kpis/:id/sound",
+    {
+      schema: {
+        description:
+          "Upload multipart de som MP3/WAV pra este KPI. Substitui arquivo anterior. " +
+          "Cria/atualiza registro KpiSound. Broadcast fica false por default — admin ativa via PATCH.",
+        tags: ["kpis"],
+        security: [{ bearerAuth: [] }],
+        params: z.object({ id: z.string() }),
+        consumes: ["multipart/form-data"],
+        response: { 200: kpiResponseSchema },
+      },
+      onRequest: [app.authenticate],
+    },
+    async (req, reply) => {
+      const kpi = await app.prisma.kpi.findUnique({ where: { id: req.params.id } });
+      if (!kpi) {
+        return reply.status(404).send({ error: "KPI não encontrado" } as never);
+      }
+
+      const file = await req.file();
+      if (!file) {
+        return reply.status(400).send({ error: "Arquivo não enviado" } as never);
+      }
+
+      const mime = file.mimetype;
+      if (!mime.startsWith("audio/")) {
+        return reply
+          .status(400)
+          .send({ error: "Arquivo precisa ser áudio (audio/*)" } as never);
+      }
+
+      const buffer = await file.toBuffer();
+      // Validação de tamanho: 2MB é o suficiente pra um efeito sonoro curto;
+      // arquivos maiores indicam upload errado (música inteira, etc).
+      const maxBytes = 2 * 1024 * 1024;
+      if (buffer.length > maxBytes) {
+        return reply
+          .status(413)
+          .send({ error: "Arquivo excede 2MB" } as never);
+      }
+
+      const storage = getSoundStorage();
+      const soundUrl = await storage.uploadKpiSound(kpi.id, buffer, mime);
+
+      await app.prisma.kpiSound.upsert({
+        where: { kpiId: kpi.id },
+        create: {
+          kpiId: kpi.id,
+          soundUrl,
+          enabled: true,
+          broadcast: false,
+        },
+        update: { soundUrl, updatedAt: new Date() },
+      });
+
+      const fresh = await app.prisma.kpi.findUniqueOrThrow({
+        where: { id: kpi.id },
+        include: KPI_INCLUDE,
+      });
+      return serializeKpi(fresh);
+    },
+  );
+
+  // ─── SOUND: PATCH (toggle flags) ────────────────────────────────────────
+  typed.patch(
+    "/api/kpis/:id/sound",
+    {
+      schema: {
+        description: "Atualiza flags do som (enabled / broadcast) sem reupload.",
+        tags: ["kpis"],
+        security: [{ bearerAuth: [] }],
+        params: z.object({ id: z.string() }),
+        body: updateSoundBodySchema,
+        response: { 200: kpiResponseSchema },
+      },
+      onRequest: [app.authenticate],
+    },
+    async (req, reply) => {
+      const existing = await app.prisma.kpiSound.findUnique({
+        where: { kpiId: req.params.id },
+      });
+      if (!existing) {
+        return reply
+          .status(404)
+          .send({ error: "KPI não tem som cadastrado" } as never);
+      }
+
+      await app.prisma.kpiSound.update({
+        where: { kpiId: req.params.id },
+        data: {
+          ...(req.body.enabled !== undefined ? { enabled: req.body.enabled } : {}),
+          ...(req.body.broadcast !== undefined ? { broadcast: req.body.broadcast } : {}),
+        },
+      });
+
+      const fresh = await app.prisma.kpi.findUniqueOrThrow({
+        where: { id: req.params.id },
+        include: KPI_INCLUDE,
+      });
+      return serializeKpi(fresh);
+    },
+  );
+
+  // ─── SOUND: DELETE ──────────────────────────────────────────────────────
+  typed.delete(
+    "/api/kpis/:id/sound",
+    {
+      schema: {
+        description:
+          "Remove som do KPI — deleta arquivo no R2 (best-effort) e registro KpiSound.",
+        tags: ["kpis"],
+        security: [{ bearerAuth: [] }],
+        params: z.object({ id: z.string() }),
+        response: { 200: kpiResponseSchema },
+      },
+      onRequest: [app.authenticate],
+    },
+    async (req, reply) => {
+      const existing = await app.prisma.kpiSound.findUnique({
+        where: { kpiId: req.params.id },
+      });
+      if (!existing) {
+        return reply
+          .status(404)
+          .send({ error: "KPI não tem som cadastrado" } as never);
+      }
+
+      const storage = getSoundStorage();
+      await storage.deleteKpiSound(req.params.id);
+      await app.prisma.kpiSound.delete({ where: { kpiId: req.params.id } });
 
       const fresh = await app.prisma.kpi.findUniqueOrThrow({
         where: { id: req.params.id },
