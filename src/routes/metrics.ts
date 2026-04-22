@@ -264,6 +264,12 @@ export default async function metricRoutes(app: FastifyInstance) {
       const newPct = convertedPercent ?? 0;
       const crossedGoal = prevPct < 100 && newPct >= 100;
 
+      // Detecta ativação NOVA (rawValue cresceu em ativacao_conta) pra
+      // broadcastar sound:play em TODOS clientes (TV + laptop do Felipe +
+      // qualquer aba aberta). Assim som toca independente de espelhamento.
+      const prevRaw = existing?.rawValue ?? 0;
+      const isNewActivation = kpi.key === "ativacao_conta" && rawValue > prevRaw;
+
       // Fire badge evaluation + ranking update + goal:hit em background.
       setImmediate(async () => {
         try {
@@ -272,6 +278,10 @@ export default async function metricRoutes(app: FastifyInstance) {
           app.log.error({ err, assessorId }, "badgeEngine failed");
         }
         eventBus.emitRankingUpdate();
+
+        if (isNewActivation) {
+          eventBus.emitSoundPlay({ kpiKey: kpi.key });
+        }
 
         if (crossedGoal) {
           try {

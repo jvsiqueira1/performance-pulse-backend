@@ -86,11 +86,18 @@ export default async function streamRoutes(app: FastifyInstance) {
         );
       });
 
+      const unsubscribeSoundPlay = eventBus.onSoundPlay((payload) => {
+        reply.raw.write(
+          `event: sound:play\ndata: ${JSON.stringify(payload)}\n\n`,
+        );
+      });
+
       req.raw.on("close", () => {
         clearInterval(heartbeat);
         unsubscribeRanking();
         unsubscribeTournament();
         unsubscribeGoalHit();
+        unsubscribeSoundPlay();
         app.log.info("SSE client disconnected");
       });
     },
